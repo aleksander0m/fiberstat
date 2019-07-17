@@ -1,0 +1,14 @@
+
+Building for iMX6 with a generic toolchain:
+
+  $ NOCONFIGURE=1 ./autogen.sh
+  $ ./configure --host=arm-linux-gnueabihf --prefix=/opt/test
+  $ make
+  $ sudo make install
+
+Building at host:
+
+  $ NOCONFIGURE=1 ./autogen.sh
+  $ ./configure --prefix=/usr
+  $ make
+  $ sudo make install
