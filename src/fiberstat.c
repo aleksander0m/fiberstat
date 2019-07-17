@@ -29,6 +29,55 @@
 #define PROGRAM_VERSION PACKAGE_VERSION
 
 /******************************************************************************/
+/* Debug logging */
+
+#define DEBUG_LOG "/tmp/fiberstat.log"
+
+static FILE *logfile;
+static bool  debug;
+
+static void
+setup_log (void)
+{
+    if (!debug)
+        return;
+    logfile = fopen (DEBUG_LOG, "w+");
+}
+
+static void
+teardown_log (void)
+{
+    if (logfile)
+        fclose (logfile);
+}
+
+static void
+log_message (const char *level,
+             const char *fmt,
+             ...)
+{
+    char    *message;
+    va_list  args;
+
+    if (!logfile)
+        return;
+
+    va_start (args, fmt);
+    if (vasprintf (&message, fmt, args) == -1)
+        return;
+    va_end (args);
+
+    fprintf (logfile, "%s %s\n", level, message);
+    fflush (logfile);
+    free (message);
+}
+
+#define log_error(...)   log_message ("[error]", ## __VA_ARGS__ )
+#define log_warning(...) log_message ("[warn ]", ## __VA_ARGS__ )
+#define log_info(...)    log_message ("[info ]", ## __VA_ARGS__ )
+#define log_debug(...)   log_message ("[debug]", ## __VA_ARGS__ )
+
+/******************************************************************************/
 /* Context */
 
 static void
@@ -38,6 +87,7 @@ print_help (void)
             "Usage: " PROGRAM_NAME " <option>\n"
             "\n"
             "Common options:\n"
+            "  -d, --debug      Verbose output in " DEBUG_LOG ".\n"
             "  -h, --help       Show help.\n"
             "  -v, --version    Show version.\n"
             "\n");
@@ -53,6 +103,7 @@ print_version (void)
 }
 
 static const struct option longopts[] = {
+    { "debug",   no_argument,       0, 'd' },
     { "version", no_argument,       0, 'v' },
     { "help",    no_argument,       0, 'h' },
     { 0,         0,                 0, 0   },
@@ -67,12 +118,15 @@ setup_context (int argc, char *const *argv)
         int idx = 0;
         int iarg = 0;
 
-        iarg = getopt_long (argc, argv, "hv", longopts, &idx);
+        iarg = getopt_long (argc, argv, "dhv", longopts, &idx);
 
         if (iarg < 0)
             break;
 
         switch (iarg) {
+        case 'd':
+            debug = true;
+            break;
         case 'h':
             print_help ();
             exit (0);
@@ -246,6 +300,8 @@ setup_interfaces (void)
         if (!iface || !iface->name)
             return -2;
 
+        log_info ("tracking interface '%s'...", iface->name);
+
         context.n_ifaces++;
         context.ifaces = realloc (context.ifaces, sizeof (InterfaceInfo *) * context.n_ifaces);
         if (!context.ifaces)
@@ -291,6 +347,10 @@ refresh_contents (void)
 int main (int argc, char *const *argv)
 {
     setup_context (argc, argv);
+    setup_log ();
+
+    log_info ("-----------------------------------------------------------");
+    log_info ("starting program " PROGRAM_NAME " (v" PROGRAM_VERSION ")...");
 
     if (setup_curses () < 0) {
         fprintf (stderr, "error: couldn't setup curses\n");
@@ -323,5 +383,6 @@ int main (int argc, char *const *argv)
 
     teardown_interfaces ();
     teardown_curses ();
+    teardown_log();
     return 0;
 }
