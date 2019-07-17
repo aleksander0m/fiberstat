@@ -19,6 +19,7 @@
 #include <ctype.h>
 #include <fcntl.h>
 #include <getopt.h>
+#include <net/if.h>
 
 #include <ncurses.h>
 
@@ -85,6 +86,8 @@ setup_context (int argc, char *const *argv)
 /******************************************************************************/
 /* Application context */
 
+typedef struct _InterfaceInfo InterfaceInfo;
+
 typedef struct {
     bool    stop;
     bool    resize;
@@ -95,6 +98,8 @@ typedef struct {
     int     max_x;
     WINDOW *header_win;
     WINDOW *content_win;
+    InterfaceInfo **ifaces;
+    unsigned int    n_ifaces;
 } Context;
 
 static Context context = {
@@ -199,6 +204,60 @@ setup_windows (void)
 }
 
 /******************************************************************************/
+/* List of interfaces */
+
+typedef struct _InterfaceInfo {
+    char *name;
+} InterfaceInfo;
+
+static void
+interface_info_free (InterfaceInfo *iface)
+{
+    free (iface->name);
+    free (iface);
+}
+
+static void
+teardown_interfaces (void)
+{
+    unsigned int i;
+
+    for (i = 0; i < context.n_ifaces; i++)
+        interface_info_free (context.ifaces[i]);
+    free (context.ifaces);
+}
+
+static int
+setup_interfaces (void)
+{
+    struct if_nameindex *if_nidxs;
+    struct if_nameindex *intf;
+
+    if_nidxs = if_nameindex ();
+    if (!if_nidxs)
+        return -1;
+
+    for (intf = if_nidxs; intf->if_index || intf->if_name; intf++) {
+        InterfaceInfo *iface;
+
+        iface = calloc (1, sizeof (InterfaceInfo));
+        if (iface)
+            iface->name = strdup (intf->if_name);
+        if (!iface || !iface->name)
+            return -2;
+
+        context.n_ifaces++;
+        context.ifaces = realloc (context.ifaces, sizeof (InterfaceInfo *) * context.n_ifaces);
+        if (!context.ifaces)
+            return -3;
+        context.ifaces[context.n_ifaces - 1] = iface;
+    }
+    if_freenameindex(if_nidxs);
+
+    return 0;
+}
+
+/******************************************************************************/
 /* Core application logic */
 
 static void
@@ -232,8 +291,14 @@ refresh_contents (void)
 int main (int argc, char *const *argv)
 {
     setup_context (argc, argv);
+
     if (setup_curses () < 0) {
         fprintf (stderr, "error: couldn't setup curses\n");
+        return -1;
+    }
+
+    if (setup_interfaces () < 0) {
+        fprintf (stderr, "error: couldn't setup interfaces\n");
         return -1;
     }
 
@@ -256,6 +321,7 @@ int main (int argc, char *const *argv)
         sleep (1);
     } while (!context.stop);
 
+    teardown_interfaces ();
     teardown_curses ();
     return 0;
 }
