@@ -20,6 +20,8 @@
 #include <fcntl.h>
 #include <getopt.h>
 #include <net/if.h>
+#include <wchar.h>
+#include <locale.h>
 
 #include <ncurses.h>
 
@@ -152,6 +154,7 @@ typedef struct {
     int     max_x;
     WINDOW *header_win;
     WINDOW *content_win;
+
     InterfaceInfo **ifaces;
     unsigned int    n_ifaces;
 } Context;
@@ -314,6 +317,63 @@ setup_interfaces (void)
 }
 
 /******************************************************************************/
+
+const wchar_t VRT = L'\x2502';
+const wchar_t HRZ = L'\x2500';
+const wchar_t TL  = L'\x250C';
+const wchar_t TR  = L'\x2510';
+const wchar_t BL  = L'\x2514';
+const wchar_t BR  = L'\x2518';
+
+#define BOX_WIDTH           6
+#define BOX_HEIGHT          18
+#define BOX_SEPARATION      2
+#define BOX_INFO_SEPARATION 2
+
+static void
+print_box (int x, int y)
+{
+    unsigned int i;
+
+    mvwaddnwstr (context.content_win, y, x, &TL, 1);
+    for (i = 0; i < BOX_WIDTH-2; i++)
+        mvwaddnwstr (context.content_win, y, x+1+i, &HRZ, 1);
+    mvwaddnwstr (context.content_win, y, x+1+BOX_WIDTH-2, &TR, 1);
+    for (i = 0; i < BOX_HEIGHT-2; i++) {
+        mvwaddnwstr (context.content_win, y+1+i, x,             &VRT, 1);
+        mvwaddnwstr (context.content_win, y+1+i, x+1+BOX_WIDTH-2, &VRT, 1);
+    }
+    mvwaddnwstr (context.content_win, y+1+BOX_HEIGHT-2, x, &BL, 1);
+    for (i = 0; i < BOX_WIDTH-2; i++)
+        mvwaddnwstr (context.content_win, y+1+BOX_HEIGHT-2, x+1+i, &HRZ, 1);
+    mvwaddnwstr (context.content_win, y+1+BOX_HEIGHT-2, x+1+BOX_WIDTH-2, &BR, 1);
+}
+
+#define INTERFACE_WIDTH  (BOX_WIDTH + BOX_SEPARATION + BOX_WIDTH)
+#define INTERFACE_HEIGHT BOX_HEIGHT
+
+static void
+print_iface_info (int x, int y, const char *name)
+{
+    int x_center;
+
+    x_center = x + (INTERFACE_WIDTH / 2) - (strlen (name) / 2);
+    mvwprintw (context.content_win, y, x_center, "%s", name);
+}
+
+static void
+print_interface (InterfaceInfo *iface, int x, int y)
+{
+    /* TX power box */
+    print_box (x, y);
+
+    /* RX power box */
+    print_box (x + BOX_WIDTH + BOX_SEPARATION, y);
+
+    print_iface_info (x, y + BOX_HEIGHT + BOX_INFO_SEPARATION, iface->name);
+}
+
+/******************************************************************************/
 /* Core application logic */
 
 static void
@@ -331,12 +391,54 @@ refresh_title (void)
     wrefresh (context.header_win);
 }
 
+#define MARGIN_HORIZONTAL                10
+#define INTERFACE_SEPARATION_HORIZONTAL  6
+#define INTERFACE_SEPARATION_VERTICAL    5
+
 static void
 refresh_contents (void)
 {
+    unsigned int i, x, y;
+    unsigned int total_width;
+    unsigned int x_initial;
+    unsigned int n_ifaces_per_row;
+    unsigned int content_max_width;
+
+    content_max_width = (context.max_x - (MARGIN_HORIZONTAL * 2));
+    log_debug ("window width: %u", context.max_x);
+    log_debug ("interface width: %u", INTERFACE_WIDTH);
+    log_debug ("content max width: %u", content_max_width);
+
     werase (context.content_win);
 
-    /* TODO */
+    n_ifaces_per_row = 0;
+    while (1) {
+        unsigned int next = ((n_ifaces_per_row + 1) * INTERFACE_WIDTH) + ((n_ifaces_per_row) * INTERFACE_SEPARATION_HORIZONTAL);
+        if (next >= content_max_width)
+            break;
+        total_width = next;
+        n_ifaces_per_row++;
+    }
+    log_debug ("number of interfaces per row: %u", n_ifaces_per_row);
+
+    if (context.n_ifaces < n_ifaces_per_row)
+        total_width = (context.n_ifaces * INTERFACE_WIDTH) + ((context.n_ifaces - 1) * INTERFACE_SEPARATION_HORIZONTAL);
+    else
+        total_width = (n_ifaces_per_row * INTERFACE_WIDTH) + ((n_ifaces_per_row - 1) * INTERFACE_SEPARATION_HORIZONTAL);
+    log_debug ("total width: %u", total_width);
+
+    x_initial = x = (context.max_x / 2) - (total_width / 2);
+    y = 0;
+
+    for (i = 0; i < context.n_ifaces; i++) {
+        print_interface (context.ifaces[i], x, y);
+        if (((i + 1) % n_ifaces_per_row) == 0) {
+            x = x_initial;
+            y += (INTERFACE_HEIGHT + INTERFACE_SEPARATION_VERTICAL);
+        } else {
+            x += (INTERFACE_WIDTH + INTERFACE_SEPARATION_HORIZONTAL);
+        }
+    }
 
     wrefresh (context.content_win);
 }
@@ -348,6 +450,8 @@ int main (int argc, char *const *argv)
 {
     setup_context (argc, argv);
     setup_log ();
+
+    setlocale (LC_ALL, "");
 
     log_info ("-----------------------------------------------------------");
     log_info ("starting program " PROGRAM_NAME " (v" PROGRAM_VERSION ")...");
