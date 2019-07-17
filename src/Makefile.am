@@ -15,5 +15,5 @@ fiberstat_CPPFLAGS = \
 
 fiberstat_LDFLAGS = \
 	$(NCURSESW_LIBS) \
-	-lpthread \
+	-lpthread -lm \
 	$(NULL)

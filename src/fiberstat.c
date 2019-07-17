@@ -22,6 +22,7 @@
 #include <net/if.h>
 #include <wchar.h>
 #include <locale.h>
+#include <math.h>
 
 #include <ncurses.h>
 
@@ -29,6 +30,11 @@
 
 #define PROGRAM_NAME    "fiberstat"
 #define PROGRAM_VERSION PACKAGE_VERSION
+
+/******************************************************************************/
+
+/* Define to test bar fill levels */
+#undef FORCE_TEST_LEVELS
 
 /******************************************************************************/
 /* Debug logging */
@@ -223,6 +229,7 @@ typedef enum {
     COLOR_PAIR_MAIN = 1,
     COLOR_PAIR_TITLE_TEXT,
     COLOR_PAIR_SHORTCUT_TEXT,
+    COLOR_PAIR_BOX_CONTENT,
 } ColorPair;
 
 static void
@@ -237,6 +244,7 @@ setup_windows (void)
         init_pair (COLOR_PAIR_MAIN, COLOR_WHITE, COLOR_BLACK);
         init_pair (COLOR_PAIR_TITLE_TEXT, COLOR_GREEN, COLOR_BLACK);
         init_pair (COLOR_PAIR_SHORTCUT_TEXT, COLOR_CYAN, COLOR_BLACK);
+        init_pair (COLOR_PAIR_BOX_CONTENT, COLOR_BLACK, COLOR_GREEN);
         bkgd (COLOR_PAIR (COLOR_PAIR_MAIN));
     }
 
@@ -261,10 +269,29 @@ setup_windows (void)
 }
 
 /******************************************************************************/
+
+/* Expected TX/RX power threshold */
+#define POWER_MAX   0.0
+#define POWER_MIN -20.0
+
+static int
+power_to_percentage (float power)
+{
+    if (power >= POWER_MAX)
+        return 100;
+    if (power <= POWER_MIN)
+        return 0;
+    return floor ((100.0 * (power - POWER_MIN) / (POWER_MAX - POWER_MIN)) + 0.5);
+}
+
+/******************************************************************************/
 /* List of interfaces */
 
 typedef struct _InterfaceInfo {
     char *name;
+    /* fit values in the [-20,0] range */
+    float tx_power;
+    float rx_power;
 } InterfaceInfo;
 
 static void
@@ -302,6 +329,8 @@ setup_interfaces (void)
             iface->name = strdup (intf->if_name);
         if (!iface || !iface->name)
             return -2;
+        iface->tx_power = POWER_MIN;
+        iface->rx_power = POWER_MIN;
 
         log_info ("tracking interface '%s'...", iface->name);
 
@@ -325,35 +354,69 @@ const wchar_t TR  = L'\x2510';
 const wchar_t BL  = L'\x2514';
 const wchar_t BR  = L'\x2518';
 
-#define BOX_WIDTH           6
-#define BOX_HEIGHT          18
-#define BOX_SEPARATION      2
-#define BOX_INFO_SEPARATION 2
+#define BOX_CONTENT_WIDTH   4
+#define BOX_WIDTH           (BOX_CONTENT_WIDTH + 2)
+#define BOX_CONTENT_HEIGHT  16
+#define BOX_HEIGHT          (BOX_CONTENT_HEIGHT + 4)
+#define BOX_SEPARATION      1
 
 static void
-print_box (int x, int y)
+print_box (int         x,
+           int         y,
+           float       power,
+           const char *label)
 {
-    unsigned int i;
+    char          buf[32];
+    unsigned int  i;
+    unsigned int  j;
+    float         fill_scaled;
+    unsigned int  fill_height;
+    char         *fill = " ";
+    unsigned int  fill_percent;
+    unsigned int  x_center;
 
+    fill_percent = power_to_percentage (power);
+    fill_scaled = ((float) fill_percent * BOX_CONTENT_HEIGHT) / 100.0;
+    fill_height = floor (fill_scaled + 0.5);
+    log_debug ("fill percent: %u, fill height: %u", fill_percent, fill_height);
+
+    /* box */
     mvwaddnwstr (context.content_win, y, x, &TL, 1);
-    for (i = 0; i < BOX_WIDTH-2; i++)
+    for (i = 0; i < BOX_CONTENT_WIDTH; i++)
         mvwaddnwstr (context.content_win, y, x+1+i, &HRZ, 1);
-    mvwaddnwstr (context.content_win, y, x+1+BOX_WIDTH-2, &TR, 1);
-    for (i = 0; i < BOX_HEIGHT-2; i++) {
-        mvwaddnwstr (context.content_win, y+1+i, x,             &VRT, 1);
-        mvwaddnwstr (context.content_win, y+1+i, x+1+BOX_WIDTH-2, &VRT, 1);
+    mvwaddnwstr (context.content_win, y, x+1+BOX_CONTENT_WIDTH, &TR, 1);
+    for (i = 0; i < BOX_CONTENT_HEIGHT; i++) {
+        mvwaddnwstr (context.content_win, y+1+i, x, &VRT, 1);
+        if (i >= (BOX_CONTENT_HEIGHT - fill_height)) {
+            wattron (context.content_win, COLOR_PAIR (COLOR_PAIR_BOX_CONTENT));
+            for (j = 0; j < BOX_CONTENT_WIDTH; j++)
+                mvwaddnstr (context.content_win, y+1+i, x+1+j, fill, 1);
+            wattroff (context.content_win, COLOR_PAIR (COLOR_PAIR_BOX_CONTENT));
+        }
+        mvwaddnwstr (context.content_win, y+1+i, x+1+BOX_CONTENT_WIDTH, &VRT, 1);
     }
-    mvwaddnwstr (context.content_win, y+1+BOX_HEIGHT-2, x, &BL, 1);
-    for (i = 0; i < BOX_WIDTH-2; i++)
-        mvwaddnwstr (context.content_win, y+1+BOX_HEIGHT-2, x+1+i, &HRZ, 1);
-    mvwaddnwstr (context.content_win, y+1+BOX_HEIGHT-2, x+1+BOX_WIDTH-2, &BR, 1);
+    mvwaddnwstr (context.content_win, y+1+BOX_CONTENT_HEIGHT, x, &BL, 1);
+    for (i = 0; i < BOX_CONTENT_WIDTH; i++)
+        mvwaddnwstr (context.content_win, y+1+BOX_CONTENT_HEIGHT, x+1+i, &HRZ, 1);
+    mvwaddnwstr (context.content_win, y+1+BOX_CONTENT_HEIGHT, x+1+BOX_CONTENT_WIDTH, &BR, 1);
+
+    x_center = x + (BOX_WIDTH / 2) - (strlen (label) / 2);
+    mvwprintw (context.content_win, y+1+BOX_CONTENT_HEIGHT+2, x_center, "%s", label);
+
+    snprintf (buf, sizeof (buf), "%.2f", power);
+    x_center = x + (BOX_WIDTH / 2) - (strlen (buf) / 2);
+    mvwprintw (context.content_win, y+1+BOX_CONTENT_HEIGHT+1, x_center, "%s", buf);
 }
 
 #define INTERFACE_WIDTH  (BOX_WIDTH + BOX_SEPARATION + BOX_WIDTH)
-#define INTERFACE_HEIGHT BOX_HEIGHT
+#define INTERFACE_HEIGHT (BOX_HEIGHT + 2)
 
 static void
-print_iface_info (int x, int y, const char *name)
+print_iface_info (int         x,
+                  int         y,
+                  const char *name,
+                  float       tx_power,
+                  float       rx_power)
 {
     int x_center;
 
@@ -364,13 +427,32 @@ print_iface_info (int x, int y, const char *name)
 static void
 print_interface (InterfaceInfo *iface, int x, int y)
 {
-    /* TX power box */
-    print_box (x, y);
+    float tx_power;
+    float rx_power;
 
-    /* RX power box */
-    print_box (x + BOX_WIDTH + BOX_SEPARATION, y);
+    tx_power = iface->tx_power;
+    rx_power = iface->rx_power;
 
-    print_iface_info (x, y + BOX_HEIGHT + BOX_INFO_SEPARATION, iface->name);
+#if defined FORCE_TEST_LEVELS
+    {
+        static float fill = -20.0;
+
+        tx_power = fill;
+        fill += 5.0;
+        if (fill > POWER_MAX)
+            fill = POWER_MIN;
+
+        rx_power = fill;
+        fill += 5.0;
+        if (fill > POWER_MAX)
+            fill = POWER_MIN;
+    }
+#endif /* FORCE_TEST_LEVELS */
+
+    /* Power boxes */
+    print_box (x, y, tx_power, "TX dBm");
+    print_box (x + BOX_WIDTH + BOX_SEPARATION, y, rx_power, "RX dBm");
+    print_iface_info (x, y + BOX_HEIGHT, iface->name, tx_power, rx_power);
 }
 
 /******************************************************************************/
@@ -391,9 +473,9 @@ refresh_title (void)
     wrefresh (context.header_win);
 }
 
-#define MARGIN_HORIZONTAL                10
-#define INTERFACE_SEPARATION_HORIZONTAL  6
-#define INTERFACE_SEPARATION_VERTICAL    5
+#define MARGIN_HORIZONTAL                5
+#define INTERFACE_SEPARATION_HORIZONTAL  3
+#define INTERFACE_SEPARATION_VERTICAL    3
 
 static void
 refresh_contents (void)
