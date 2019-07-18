@@ -267,7 +267,9 @@ typedef enum {
     COLOR_PAIR_MAIN = 1,
     COLOR_PAIR_TITLE_TEXT,
     COLOR_PAIR_SHORTCUT_TEXT,
-    COLOR_PAIR_BOX_CONTENT,
+    COLOR_PAIR_BOX_CONTENT_GREEN,
+    COLOR_PAIR_BOX_CONTENT_YELLOW,
+    COLOR_PAIR_BOX_CONTENT_RED,
 } ColorPair;
 
 static void
@@ -282,7 +284,9 @@ setup_windows (void)
         init_pair (COLOR_PAIR_MAIN, COLOR_WHITE, COLOR_BLACK);
         init_pair (COLOR_PAIR_TITLE_TEXT, COLOR_GREEN, COLOR_BLACK);
         init_pair (COLOR_PAIR_SHORTCUT_TEXT, COLOR_CYAN, COLOR_BLACK);
-        init_pair (COLOR_PAIR_BOX_CONTENT, COLOR_BLACK, COLOR_GREEN);
+        init_pair (COLOR_PAIR_BOX_CONTENT_GREEN, COLOR_BLACK, COLOR_GREEN);
+        init_pair (COLOR_PAIR_BOX_CONTENT_YELLOW, COLOR_BLACK, COLOR_YELLOW);
+        init_pair (COLOR_PAIR_BOX_CONTENT_RED, COLOR_BLACK, COLOR_RED);
         bkgd (COLOR_PAIR (COLOR_PAIR_MAIN));
     }
 
@@ -310,8 +314,10 @@ setup_windows (void)
 
 /* Expected TX/RX power threshold */
 #define POWER_MAX   0.0
-#define POWER_MIN -20.0
-#define POWER_UNK -40.0
+#define POWER_GOOD -10.0
+#define POWER_BAD  -15.0
+#define POWER_MIN  -20.0
+#define POWER_UNK  -40.0
 
 static int
 power_to_percentage (float power)
@@ -443,6 +449,8 @@ print_box (int         x,
            float       power,
            const char *label)
 {
+    static int    good_level_fill_height = 0;
+    static int    bad_level_fill_height  = 0;
     char          buf[32];
     unsigned int  i;
     unsigned int  j;
@@ -452,10 +460,29 @@ print_box (int         x,
     unsigned int  fill_percent;
     unsigned int  x_center;
 
+    if (!good_level_fill_height) {
+        fill_percent = power_to_percentage (POWER_GOOD);
+        fill_scaled = ((float) fill_percent * BOX_CONTENT_HEIGHT) / 100.0;
+        fill_height = floor (fill_scaled + 0.5);
+        log_debug ("good level fill percent: %u, fill height: %u, power: %.2f dBm",
+                   fill_percent, fill_height, POWER_GOOD);
+        good_level_fill_height = fill_height;
+    }
+
+    if (!bad_level_fill_height) {
+        fill_percent = power_to_percentage (POWER_BAD);
+        fill_scaled = ((float) fill_percent * BOX_CONTENT_HEIGHT) / 100.0;
+        fill_height = floor (fill_scaled + 0.5);
+        log_debug ("bad level fill percent: %u, fill height: %u, power: %.2f dBm",
+                   fill_percent, fill_height, POWER_BAD);
+        bad_level_fill_height = fill_height;
+    }
+
     fill_percent = power_to_percentage (power);
     fill_scaled = ((float) fill_percent * BOX_CONTENT_HEIGHT) / 100.0;
     fill_height = floor (fill_scaled + 0.5);
-    log_debug ("fill percent: %u, fill height: %u", fill_percent, fill_height);
+    log_debug ("fill percent: %u, fill height: %u, power: %.2f dBm",
+               fill_percent, fill_height, power);
 
     /* box */
     mvwaddnwstr (context.content_win, y, x, &TL, 1);
@@ -465,10 +492,19 @@ print_box (int         x,
     for (i = 0; i < BOX_CONTENT_HEIGHT; i++) {
         mvwaddnwstr (context.content_win, y+1+i, x, &VRT, 1);
         if (i >= (BOX_CONTENT_HEIGHT - fill_height)) {
-            wattron (context.content_win, COLOR_PAIR (COLOR_PAIR_BOX_CONTENT));
+            int row_color;
+
+            if (i >= (BOX_CONTENT_HEIGHT - bad_level_fill_height))
+                row_color = COLOR_PAIR (COLOR_PAIR_BOX_CONTENT_RED);
+            else if (i >= (BOX_CONTENT_HEIGHT - good_level_fill_height))
+                row_color = COLOR_PAIR (COLOR_PAIR_BOX_CONTENT_YELLOW);
+            else
+                row_color = COLOR_PAIR (COLOR_PAIR_BOX_CONTENT_GREEN);
+
+            wattron (context.content_win, row_color);
             for (j = 0; j < BOX_CONTENT_WIDTH; j++)
                 mvwaddnstr (context.content_win, y+1+i, x+1+j, fill, 1);
-            wattroff (context.content_win, COLOR_PAIR (COLOR_PAIR_BOX_CONTENT));
+            wattroff (context.content_win, row_color);
         }
         mvwaddnwstr (context.content_win, y+1+i, x+1+BOX_CONTENT_WIDTH, &VRT, 1);
     }
@@ -515,14 +551,16 @@ print_interface (InterfaceInfo *iface, int x, int y)
         static float fill = -20.0;
 
         tx_power = fill;
-        fill += 5.0;
+        fill += 2.5;
         if (fill > POWER_MAX)
             fill = POWER_MIN;
 
         rx_power = fill;
-        fill += 5.0;
+        fill += 2.5;
         if (fill > POWER_MAX)
             fill = POWER_MIN;
+
+        log_debug ("forced test levels: TX %.2f dBm, RX %.2f dBm", tx_power, rx_power);
     }
 #endif /* FORCE_TEST_LEVELS */
 
