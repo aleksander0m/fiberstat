@@ -98,6 +98,9 @@ log_message (const char *level,
 /******************************************************************************/
 /* Context */
 
+#define DEFAULT_TIMEOUT_MS 1000
+static int timeout_ms = -1;
+
 static void
 print_help (void)
 {
@@ -105,6 +108,7 @@ print_help (void)
             "Usage: " PROGRAM_NAME " <option>\n"
             "\n"
             "Common options:\n"
+            "  -t, --timeout    How often to reload values, in ms.\n"
             "  -d, --debug      Verbose output in " DEBUG_LOG ".\n"
             "  -h, --help       Show help.\n"
             "  -v, --version    Show version.\n"
@@ -121,6 +125,7 @@ print_version (void)
 }
 
 static const struct option longopts[] = {
+    { "timeout", required_argument, 0, 't' },
     { "debug",   no_argument,       0, 'd' },
     { "version", no_argument,       0, 'v' },
     { "help",    no_argument,       0, 'h' },
@@ -136,12 +141,19 @@ setup_context (int argc, char *const *argv)
         int idx = 0;
         int iarg = 0;
 
-        iarg = getopt_long (argc, argv, "dhv", longopts, &idx);
+        iarg = getopt_long (argc, argv, "t:dhv", longopts, &idx);
 
         if (iarg < 0)
             break;
 
         switch (iarg) {
+        case 't':
+            timeout_ms = atoi (optarg);
+            if (timeout_ms <= 0) {
+                fprintf (stderr, "error: invalid timeout: %s", optarg);
+                exit (EXIT_FAILURE);
+            }
+            break;
         case 'd':
             debug = true;
             break;
@@ -677,7 +689,7 @@ int main (int argc, char *const *argv)
             context.refresh_contents = false;
         }
 
-        sleep (1);
+        usleep ((timeout_ms > 0 ? timeout_ms : DEFAULT_TIMEOUT_MS) * 1000);
     } while (!context.stop);
 
     teardown_interfaces ();
