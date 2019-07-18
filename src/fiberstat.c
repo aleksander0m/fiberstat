@@ -17,6 +17,8 @@
 #include <signal.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <fcntl.h>
 #include <getopt.h>
 #include <net/if.h>
@@ -35,6 +37,14 @@
 
 /* Define to test bar fill levels */
 #undef FORCE_TEST_LEVELS
+
+/* Define to test polling fake sysfs files
+ * E.g.:
+ *   $ mkdir -p /tmp/lo
+ *   $ echo 100 > /tmp/lo/power1_input
+ *   $ echo 200 > /tmp/lo/power2_input
+ */
+#undef FORCE_TEST_SYSFS
 
 /******************************************************************************/
 /* Debug logging */
@@ -273,6 +283,7 @@ setup_windows (void)
 /* Expected TX/RX power threshold */
 #define POWER_MAX   0.0
 #define POWER_MIN -20.0
+#define POWER_UNK -40.0
 
 static int
 power_to_percentage (float power)
@@ -289,6 +300,10 @@ power_to_percentage (float power)
 
 typedef struct _InterfaceInfo {
     char *name;
+    char *tx_power_path;
+    char *rx_power_path;
+    int   tx_power_fd;
+    int   rx_power_fd;
     /* fit values in the [-20,0] range */
     float tx_power;
     float rx_power;
@@ -297,6 +312,12 @@ typedef struct _InterfaceInfo {
 static void
 interface_info_free (InterfaceInfo *iface)
 {
+    if (!(iface->tx_power_fd < 0))
+        close (iface->tx_power_fd);
+    if (!(iface->rx_power_fd < 0))
+        close (iface->rx_power_fd);
+    free (iface->tx_power_path);
+    free (iface->rx_power_path);
     free (iface->name);
     free (iface);
 }
@@ -329,10 +350,38 @@ setup_interfaces (void)
             iface->name = strdup (intf->if_name);
         if (!iface || !iface->name)
             return -2;
-        iface->tx_power = POWER_MIN;
-        iface->rx_power = POWER_MIN;
 
         log_info ("tracking interface '%s'...", iface->name);
+
+        iface->tx_power = POWER_MIN;
+        iface->rx_power = POWER_MIN;
+        iface->tx_power_fd = -1;
+        iface->rx_power_fd = -1;
+
+#if defined FORCE_TEST_SYSFS
+        {
+            char aux[256];
+
+            snprintf (aux, sizeof (aux), "/tmp/%s/power1_input", iface->name);
+            iface->tx_power_path = strdup (aux);
+            snprintf (aux, sizeof (aux), "/tmp/%s/power2_input", iface->name);
+            iface->rx_power_path = strdup (aux);
+        }
+#endif
+
+        if (iface->tx_power_path) {
+            iface->tx_power_fd = open (iface->tx_power_path, O_RDONLY);
+            if (iface->tx_power_fd < 0)
+                log_warning ("couldn't open TX power file for interface '%s' at %s", iface->name, iface->tx_power_path);
+        } else
+            log_warning ("TX power file for interface '%s' undefined", iface->name);
+
+        if (iface->rx_power_path) {
+            iface->rx_power_fd = open (iface->rx_power_path, O_RDONLY);
+            if (iface->rx_power_fd < 0)
+                log_warning ("couldn't open RX power file for interface '%s' at %s", iface->name, iface->rx_power_path);
+        } else
+            log_warning ("RX power file for interface '%s' undefined", iface->name);
 
         context.n_ifaces++;
         context.ifaces = realloc (context.ifaces, sizeof (InterfaceInfo *) * context.n_ifaces);
@@ -526,6 +575,68 @@ refresh_contents (void)
 }
 
 /******************************************************************************/
+
+static float
+reload_power_from_file (int fd)
+{
+    float   value;
+    char    buffer[255] = { 0 };
+    ssize_t n_read;
+
+    lseek (fd, 0, SEEK_SET);
+    n_read = read (fd, buffer, sizeof (buffer));
+    if (n_read <= 0)
+        return POWER_UNK;
+
+    value = strtof (buffer, NULL);
+    if (value < 0.1)
+        return POWER_UNK;
+
+    /* power given in uW by the kernel, we use dBm instead */
+    return (10 * log10 (value / 1000.0));
+}
+
+static int
+update_value (int fd, float *value)
+{
+    float power;
+
+    power = reload_power_from_file (fd);
+    if (fabs (power - *value) < 0.001)
+        return -1;
+
+    *value = power;
+    return 0;
+}
+
+static void
+reload_values (void)
+{
+    unsigned int i;
+    unsigned int n_updates = 0;
+
+    for (i = 0; i < context.n_ifaces; i++) {
+        if ((!(context.ifaces[i]->tx_power_fd < 0)) &&
+            update_value (context.ifaces[i]->tx_power_fd, &context.ifaces[i]->tx_power) == 0) {
+            log_debug ("'%s' interface TX power updated: %.2lf",
+                       context.ifaces[i]->name, context.ifaces[i]->tx_power);
+            n_updates++;
+        }
+        if ((!(context.ifaces[i]->rx_power_fd < 0)) &&
+            update_value (context.ifaces[i]->rx_power_fd, &context.ifaces[i]->rx_power) == 0) {
+            log_debug ("'%s' interface RX power updated: %.2lf",
+                       context.ifaces[i]->name, context.ifaces[i]->rx_power);
+            n_updates++;
+        }
+    }
+
+    if (n_updates) {
+        log_debug ("need to refresh contents: %u values updated", n_updates);
+        context.refresh_contents = true;
+    }
+}
+
+/******************************************************************************/
 /* Main */
 
 int main (int argc, char *const *argv)
@@ -549,6 +660,8 @@ int main (int argc, char *const *argv)
     }
 
     do {
+        reload_values ();
+
         if (context.resize) {
             setup_windows ();
             context.resize = false;
