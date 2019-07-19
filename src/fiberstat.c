@@ -467,22 +467,26 @@ setup_hwmon_list (void)
 /******************************************************************************/
 /* List of interfaces */
 
-#define NET_SYSFS_DIR    "/sys/class/net"
-#define NET_PHANDLE_FILE "of_node/sfp"
+#define NET_SYSFS_DIR      "/sys/class/net"
+#define NET_PHANDLE_FILE   "of_node/sfp"
+#define NET_OPERSTATE_FILE "operstate"
 
 typedef struct _InterfaceInfo {
     char      *name;
     HwmonInfo *hwmon;
+    char      *operstate_path;
 
 #if defined FORCE_TEST_SYSFS
     char *tx_power_path;
     char *rx_power_path;
 #endif
 
-    int   tx_power_fd;
-    int   rx_power_fd;
-    float tx_power;
-    float rx_power;
+    int    tx_power_fd;
+    int    rx_power_fd;
+    int    operstate_fd;
+    float  tx_power;
+    float  rx_power;
+    char  *operstate;
 } InterfaceInfo;
 
 static void
@@ -492,10 +496,14 @@ interface_info_free (InterfaceInfo *iface)
         close (iface->tx_power_fd);
     if (!(iface->rx_power_fd < 0))
         close (iface->rx_power_fd);
+    if (!(iface->operstate_fd < 0))
+        close (iface->operstate_fd);
 #if defined FORCE_TEST_SYSFS
     free (iface->tx_power_path);
     free (iface->rx_power_path);
 #endif
+    free (iface->operstate_path);
+    free (iface->operstate);
     free (iface->name);
     free (iface);
 }
@@ -571,6 +579,7 @@ setup_interfaces (void)
         iface->rx_power = POWER_MIN;
         iface->tx_power_fd = -1;
         iface->rx_power_fd = -1;
+        iface->operstate_fd = -1;
 
 #if !defined FORCE_TEST_SYSFS
         iface->tx_power_fd = open (hwmon->tx_power_path, O_RDONLY);
@@ -591,6 +600,12 @@ setup_interfaces (void)
         if (iface->rx_power_fd < 0)
             log_warning ("couldn't open RX power file for interface '%s' at %s", iface->name, iface->rx_power_path);
 #endif
+
+        snprintf (path, sizeof (path), NET_SYSFS_DIR "/%s/" NET_OPERSTATE_FILE, iface->name);
+        iface->operstate_path = strdup (path);
+        iface->operstate_fd = open (iface->operstate_path, O_RDONLY);
+        if (iface->operstate_fd < 0)
+            log_warning ("couldn't open operstate file for interface '%s' at %s", iface->name, iface->operstate_path);
 
         context.n_ifaces++;
         context.ifaces = realloc (context.ifaces, sizeof (InterfaceInfo *) * context.n_ifaces);
@@ -857,6 +872,28 @@ update_value (int fd, float *value)
     return 0;
 }
 
+static int
+update_string (int fd, char **str)
+{
+    char    buffer[255] = { 0 };
+    ssize_t n_read;
+
+    lseek (fd, 0, SEEK_SET);
+    n_read = read (fd, buffer, sizeof (buffer));
+    if (n_read <= 0)
+        return -1;
+
+    if (buffer[n_read - 1] == '\n')
+        buffer[n_read - 1] = '\0';
+
+    if (*str && strcmp (*str, buffer) == 0)
+        return -1;
+
+    free (*str);
+    *str = strdup (buffer);
+    return 0;
+}
+
 static void
 reload_values (void)
 {
@@ -874,6 +911,12 @@ reload_values (void)
             update_value (context.ifaces[i]->rx_power_fd, &context.ifaces[i]->rx_power) == 0) {
             log_debug ("'%s' interface RX power updated: %.2lf",
                        context.ifaces[i]->name, context.ifaces[i]->rx_power);
+            n_updates++;
+        }
+        if ((!(context.ifaces[i]->operstate_fd < 0)) &&
+            update_string (context.ifaces[i]->operstate_fd, &context.ifaces[i]->operstate) == 0) {
+            log_debug ("'%s' interface operational state updated: %s",
+                       context.ifaces[i]->name, context.ifaces[i]->operstate);
             n_updates++;
         }
     }
