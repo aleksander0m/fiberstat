@@ -10,10 +10,10 @@ fiberstat_CPPFLAGS = \
 	-I$(top_builddir) \
 	-I$(top_srcdir)/src \
 	-I$(top_builddir)/src \
-	$(NCURSESW_CFLAGS) \
+	$(NCURSES_CFLAGS) \
 	$(NULL)
 
 fiberstat_LDFLAGS = \
-	$(NCURSESW_LIBS) \
+	$(NCURSES_LIBS) \
 	-lpthread -lm \
 	$(NULL)

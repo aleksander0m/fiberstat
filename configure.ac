@@ -28,9 +28,9 @@ dnl Specific warnings to always use
 FIBERSTAT_COMPILER_WARNINGS
 
 dnl ncurses
-PKG_CHECK_MODULES([NCURSESW], [ncursesw])
-AC_SUBST(NCURSESW_CFLAGS)
-AC_SUBST(NCURSESW_LIBS)
+PKG_CHECK_MODULES([NCURSES], [ncurses])
+AC_SUBST(NCURSES_CFLAGS)
+AC_SUBST(NCURSES_LIBS)
 
 AC_CONFIG_FILES([Makefile
                  src/Makefile])

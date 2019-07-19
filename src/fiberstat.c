@@ -38,7 +38,6 @@
 #include <fcntl.h>
 #include <getopt.h>
 #include <net/if.h>
-#include <wchar.h>
 #include <locale.h>
 #include <math.h>
 #include <dirent.h>
@@ -606,12 +605,12 @@ setup_interfaces (void)
 
 /******************************************************************************/
 
-const wchar_t VRT = L'\x2502';
-const wchar_t HRZ = L'\x2500';
-const wchar_t TL  = L'\x250C';
-const wchar_t TR  = L'\x2510';
-const wchar_t BL  = L'\x2514';
-const wchar_t BR  = L'\x2518';
+static const char *VRT = "│";
+static const char *HRZ = "─";
+static const char *TL  = "┌";
+static const char *TR  = "┐";
+static const char *BL  = "└";
+static const char *BR  = "┘";
 
 #define BOX_CONTENT_WIDTH   4
 #define BOX_WIDTH           (BOX_CONTENT_WIDTH + 2)
@@ -632,7 +631,7 @@ print_box (int         x,
     unsigned int  j;
     float         fill_scaled;
     unsigned int  fill_height;
-    char         *fill = " ";
+    const char   *fill = " ";
     unsigned int  fill_percent;
     unsigned int  x_center;
 
@@ -661,12 +660,12 @@ print_box (int         x,
                fill_percent, fill_height, power);
 
     /* box */
-    mvwaddnwstr (context.content_win, y, x, &TL, 1);
+    mvwprintw (context.content_win, y, x, "%s", TL);
     for (i = 0; i < BOX_CONTENT_WIDTH; i++)
-        mvwaddnwstr (context.content_win, y, x+1+i, &HRZ, 1);
-    mvwaddnwstr (context.content_win, y, x+1+BOX_CONTENT_WIDTH, &TR, 1);
+        mvwprintw (context.content_win, y, x+1+i, "%s", HRZ);
+    mvwprintw (context.content_win, y, x+1+BOX_CONTENT_WIDTH, "%s", TR);
     for (i = 0; i < BOX_CONTENT_HEIGHT; i++) {
-        mvwaddnwstr (context.content_win, y+1+i, x, &VRT, 1);
+        mvwprintw (context.content_win, y+1+i, x, "%s", VRT);
         if (i >= (BOX_CONTENT_HEIGHT - fill_height)) {
             int row_color;
 
@@ -679,15 +678,15 @@ print_box (int         x,
 
             wattron (context.content_win, row_color);
             for (j = 0; j < BOX_CONTENT_WIDTH; j++)
-                mvwaddnstr (context.content_win, y+1+i, x+1+j, fill, 1);
+                mvwprintw (context.content_win, y+1+i, x+1+j, fill);
             wattroff (context.content_win, row_color);
         }
-        mvwaddnwstr (context.content_win, y+1+i, x+1+BOX_CONTENT_WIDTH, &VRT, 1);
+        mvwprintw (context.content_win, y+1+i, x+1+BOX_CONTENT_WIDTH, "%s", VRT);
     }
-    mvwaddnwstr (context.content_win, y+1+BOX_CONTENT_HEIGHT, x, &BL, 1);
+    mvwprintw (context.content_win, y+1+BOX_CONTENT_HEIGHT, x, "%s", BL);
     for (i = 0; i < BOX_CONTENT_WIDTH; i++)
-        mvwaddnwstr (context.content_win, y+1+BOX_CONTENT_HEIGHT, x+1+i, &HRZ, 1);
-    mvwaddnwstr (context.content_win, y+1+BOX_CONTENT_HEIGHT, x+1+BOX_CONTENT_WIDTH, &BR, 1);
+        mvwprintw (context.content_win, y+1+BOX_CONTENT_HEIGHT, x+1+i, "%s", HRZ);
+    mvwprintw (context.content_win, y+1+BOX_CONTENT_HEIGHT, x+1+BOX_CONTENT_WIDTH, "%s", BR);
 
     x_center = x + (BOX_WIDTH / 2) - (strlen (label) / 2);
     mvwprintw (context.content_win, y+1+BOX_CONTENT_HEIGHT+2, x_center, "%s", label);
