@@ -41,6 +41,7 @@
 #include <wchar.h>
 #include <locale.h>
 #include <math.h>
+#include <dirent.h>
 
 #include <ncurses.h>
 
@@ -187,6 +188,7 @@ setup_context (int argc, char *const *argv)
 /* Application context */
 
 typedef struct _InterfaceInfo InterfaceInfo;
+typedef struct _HwmonInfo     HwmonInfo;
 
 typedef struct {
     bool    stop;
@@ -201,6 +203,9 @@ typedef struct {
 
     InterfaceInfo **ifaces;
     unsigned int    n_ifaces;
+
+    HwmonInfo    **hwmon;
+    unsigned int   n_hwmon;
 } Context;
 
 static Context context = {
@@ -330,6 +335,123 @@ power_to_percentage (float power)
 }
 
 /******************************************************************************/
+/* List of hwmon entries */
+
+#define HWMON_SYSFS_DIR     "/sys/class/hwmon"
+#define HWMON_TX_POWER_FILE "power1_input"
+#define HWMON_RX_POWER_FILE "power2_input"
+#define HWMON_PHANDLE_FILE  "of_node/phandle"
+
+typedef struct _HwmonInfo {
+    char    *name;
+    char    *tx_power_path;
+    char    *rx_power_path;
+    uint8_t  sfp_phandle[4];
+} HwmonInfo;
+
+static void
+hwmon_info_free (HwmonInfo *info)
+{
+    free (info->tx_power_path);
+    free (info->tx_power_path);
+    free (info->name);
+    free (info);
+}
+
+static void
+teardown_hwmon_list (void)
+{
+    unsigned int i;
+
+    for (i = 0; i < context.n_hwmon; i++)
+        hwmon_info_free (context.hwmon[i]);
+    free (context.hwmon);
+}
+
+static int
+setup_hwmon_list (void)
+{
+    DIR           *d;
+    struct dirent *dir;
+
+    d = opendir (HWMON_SYSFS_DIR);
+    if (!d)
+        return -1;
+
+    while ((dir = readdir(d)) != NULL) {
+        char       path1[PATH_MAX];
+        char       path2[PATH_MAX];
+        char       path3[PATH_MAX];
+        uint8_t    phandle[4];
+        HwmonInfo *info;
+        int        fd;
+        int        n_read;
+
+        if ((strcmp (dir->d_name, ".") == 0) || (strcmp (dir->d_name, "..") == 0))
+            continue;
+
+        snprintf (path1, sizeof (path1), HWMON_SYSFS_DIR "/%s/" HWMON_TX_POWER_FILE, dir->d_name);
+        fd = open (path1, O_RDONLY);
+        if (fd < 0) {
+            log_debug ("hwmon '%s' doesn't have tx power file", dir->d_name);
+            continue;
+        }
+        close (fd);
+
+        snprintf (path2, sizeof (path2), HWMON_SYSFS_DIR "/%s/" HWMON_RX_POWER_FILE, dir->d_name);
+        fd = open (path2, O_RDONLY);
+        if (fd < 0) {
+            log_debug ("hwmon '%s' doesn't have rx power file", dir->d_name);
+            continue;
+        }
+        close (fd);
+
+        snprintf (path3, sizeof (path3), HWMON_SYSFS_DIR "/%s/" HWMON_PHANDLE_FILE, dir->d_name);
+        fd = open (path3, O_RDONLY);
+        if (fd < 0) {
+            log_debug ("hwmon '%s' doesn't have sfp phandle file", dir->d_name);
+            continue;
+        }
+
+        n_read = read (fd, phandle, sizeof (phandle));
+        close (fd);
+
+        if (n_read < sizeof (phandle)) {
+            log_warning ("couldn't read hwmon '%s' sfp phandle file", dir->d_name);
+            continue;
+        }
+
+        /* valid hwmon entry */
+
+        info = calloc (sizeof (HwmonInfo), 1);
+        if (!info)
+            return -2;
+
+        info->name = strdup (dir->d_name);
+        info->tx_power_path = strdup (path1);
+        info->rx_power_path = strdup (path2);
+        memcpy (info->sfp_phandle, phandle, sizeof (phandle));
+
+        context.n_hwmon++;
+        context.hwmon = realloc (context.hwmon, sizeof (HwmonInfo *) * context.n_hwmon);
+        if (!context.hwmon)
+            return -3;
+        context.hwmon[context.n_hwmon - 1] = info;
+
+        log_info ("hwmon '%s' is a valid monitor with sfp handle %02x:%02x:%02x:%02x",
+                  dir->d_name, phandle[0], phandle[1], phandle[2], phandle[3]);
+    }
+
+    if (context.n_hwmon > 0)
+        log_info ("hwmon entries found: %u", context.n_hwmon);
+    else
+        log_error ("no hwmon entries found");
+
+    closedir (d);
+    return 0;
+}
+
+/******************************************************************************/
 /* List of interfaces */
 
 typedef struct _InterfaceInfo {
@@ -396,9 +518,9 @@ setup_interfaces (void)
         {
             char aux[256];
 
-            snprintf (aux, sizeof (aux), "/tmp/%s/power1_input", iface->name);
+            snprintf (aux, sizeof (aux), "/tmp/%s/" HWMON_TX_POWER_FILE, iface->name);
             iface->tx_power_path = strdup (aux);
-            snprintf (aux, sizeof (aux), "/tmp/%s/power2_input", iface->name);
+            snprintf (aux, sizeof (aux), "/tmp/%s/" HWMON_RX_POWER_FILE, iface->name);
             iface->rx_power_path = strdup (aux);
         }
 #endif
@@ -720,6 +842,11 @@ int main (int argc, char *const *argv)
         return -1;
     }
 
+    if (setup_hwmon_list () < 0) {
+        fprintf (stderr, "error: couldn't setup hwmon list\n");
+        return -1;
+    }
+
     if (setup_interfaces () < 0) {
         fprintf (stderr, "error: couldn't setup interfaces\n");
         return -1;
@@ -747,6 +874,7 @@ int main (int argc, char *const *argv)
     } while (!context.stop);
 
     teardown_interfaces ();
+    teardown_hwmon_list ();
     teardown_curses ();
     teardown_log();
     return 0;
