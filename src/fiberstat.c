@@ -605,12 +605,19 @@ setup_interfaces (void)
 
 /******************************************************************************/
 
-static const char *VRT = "│";
-static const char *HRZ = "─";
-static const char *TL  = "┌";
-static const char *TR  = "┐";
-static const char *BL  = "└";
-static const char *BR  = "┘";
+typedef enum {
+    BOX_CHARSET_ASCII,
+    BOX_CHARSET_UTF8,
+} BoxCharset;
+
+static const char *VRT[] = { [BOX_CHARSET_ASCII] = "|", [BOX_CHARSET_UTF8] = "│" };
+static const char *HRZ[] = { [BOX_CHARSET_ASCII] = "-", [BOX_CHARSET_UTF8] = "─" };
+static const char *TL[]  = { [BOX_CHARSET_ASCII] = "-", [BOX_CHARSET_UTF8] = "┌" };
+static const char *TR[]  = { [BOX_CHARSET_ASCII] = "-", [BOX_CHARSET_UTF8] = "┐" };
+static const char *BL[]  = { [BOX_CHARSET_ASCII] = "-", [BOX_CHARSET_UTF8] = "└" };
+static const char *BR[]  = { [BOX_CHARSET_ASCII] = "-", [BOX_CHARSET_UTF8] = "┘" };
+
+static BoxCharset current_box_charset = BOX_CHARSET_ASCII;
 
 #define BOX_CONTENT_WIDTH   4
 #define BOX_WIDTH           (BOX_CONTENT_WIDTH + 2)
@@ -660,12 +667,12 @@ print_box (int         x,
                fill_percent, fill_height, power);
 
     /* box */
-    mvwprintw (context.content_win, y, x, "%s", TL);
+    mvwprintw (context.content_win, y, x, "%s", TL[current_box_charset]);
     for (i = 0; i < BOX_CONTENT_WIDTH; i++)
-        mvwprintw (context.content_win, y, x+1+i, "%s", HRZ);
-    mvwprintw (context.content_win, y, x+1+BOX_CONTENT_WIDTH, "%s", TR);
+        mvwprintw (context.content_win, y, x+1+i, "%s", HRZ[current_box_charset]);
+    mvwprintw (context.content_win, y, x+1+BOX_CONTENT_WIDTH, "%s", TR[current_box_charset]);
     for (i = 0; i < BOX_CONTENT_HEIGHT; i++) {
-        mvwprintw (context.content_win, y+1+i, x, "%s", VRT);
+        mvwprintw (context.content_win, y+1+i, x, "%s", VRT[current_box_charset]);
         if (i >= (BOX_CONTENT_HEIGHT - fill_height)) {
             int row_color;
 
@@ -681,12 +688,12 @@ print_box (int         x,
                 mvwprintw (context.content_win, y+1+i, x+1+j, fill);
             wattroff (context.content_win, row_color);
         }
-        mvwprintw (context.content_win, y+1+i, x+1+BOX_CONTENT_WIDTH, "%s", VRT);
+        mvwprintw (context.content_win, y+1+i, x+1+BOX_CONTENT_WIDTH, "%s", VRT[current_box_charset]);
     }
-    mvwprintw (context.content_win, y+1+BOX_CONTENT_HEIGHT, x, "%s", BL);
+    mvwprintw (context.content_win, y+1+BOX_CONTENT_HEIGHT, x, "%s", BL[current_box_charset]);
     for (i = 0; i < BOX_CONTENT_WIDTH; i++)
-        mvwprintw (context.content_win, y+1+BOX_CONTENT_HEIGHT, x+1+i, "%s", HRZ);
-    mvwprintw (context.content_win, y+1+BOX_CONTENT_HEIGHT, x+1+BOX_CONTENT_WIDTH, "%s", BR);
+        mvwprintw (context.content_win, y+1+BOX_CONTENT_HEIGHT, x+1+i, "%s", HRZ[current_box_charset]);
+    mvwprintw (context.content_win, y+1+BOX_CONTENT_HEIGHT, x+1+BOX_CONTENT_WIDTH, "%s", BR[current_box_charset]);
 
     x_center = x + (BOX_WIDTH / 2) - (strlen (label) / 2);
     mvwprintw (context.content_win, y+1+BOX_CONTENT_HEIGHT+2, x_center, "%s", label);
@@ -880,12 +887,23 @@ reload_values (void)
 /******************************************************************************/
 /* Main */
 
+static void
+setup_locale (void)
+{
+    const char *current;
+
+    setlocale (LC_ALL, "");
+
+    current = setlocale (LC_CTYPE, NULL);
+    if (current && strstr (current, "utf8"))
+        current_box_charset = BOX_CHARSET_UTF8;
+}
+
 int main (int argc, char *const *argv)
 {
     setup_context (argc, argv);
     setup_log ();
-
-    setlocale (LC_ALL, "");
+    setup_locale ();
 
     log_info ("-----------------------------------------------------------");
     log_info ("starting program " PROGRAM_NAME " (v" PROGRAM_VERSION ")...");
