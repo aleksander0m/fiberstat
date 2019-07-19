@@ -719,19 +719,23 @@ print_box (int         x,
 }
 
 #define INTERFACE_WIDTH  (BOX_WIDTH + BOX_SEPARATION + BOX_WIDTH)
-#define INTERFACE_HEIGHT (BOX_HEIGHT + 2)
+#define INTERFACE_HEIGHT (BOX_HEIGHT + 3)
 
 static void
 print_iface_info (int         x,
                   int         y,
                   const char *name,
-                  float       tx_power,
-                  float       rx_power)
+                  const char *operstate)
 {
-    int x_center;
+    char buffer[100];
+    int  x_center;
 
     x_center = x + (INTERFACE_WIDTH / 2) - (strlen (name) / 2);
     mvwprintw (context.content_win, y, x_center, "%s", name);
+
+    snprintf (buffer, sizeof (buffer), "link %s", operstate);
+    x_center = x + (INTERFACE_WIDTH / 2) - (strlen (buffer) / 2);
+    mvwprintw (context.content_win, y + 1, x_center, "%s", buffer);
 }
 
 static void
@@ -764,7 +768,7 @@ print_interface (InterfaceInfo *iface, int x, int y)
     /* Power boxes */
     print_box (x, y, tx_power, "TX dBm");
     print_box (x + BOX_WIDTH + BOX_SEPARATION, y, rx_power, "RX dBm");
-    print_iface_info (x, y + BOX_HEIGHT, iface->name, tx_power, rx_power);
+    print_iface_info (x, y + BOX_HEIGHT, iface->name, iface->operstate);
 }
 
 /******************************************************************************/
