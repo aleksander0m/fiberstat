@@ -9,6 +9,6 @@ Building for iMX6 with a generic toolchain:
 Building at host:
 
   $ NOCONFIGURE=1 ./autogen.sh
-  $ ./configure --prefix=/usr
+  $ ./configure --prefix=/usr CFLAGS="-DFORCE_TEST_SYSFS -DFORCE_TEST_LEVELS"
   $ make
   $ sudo make install

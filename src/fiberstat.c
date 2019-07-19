@@ -52,7 +52,7 @@
 /******************************************************************************/
 
 /* Define to test bar fill levels */
-#undef FORCE_TEST_LEVELS
+/* #define FORCE_TEST_LEVELS */
 
 /* Define to test polling fake sysfs files
  * E.g.:
@@ -60,7 +60,7 @@
  *   $ echo 100 > /tmp/lo/power1_input
  *   $ echo 200 > /tmp/lo/power2_input
  */
-#undef FORCE_TEST_SYSFS
+/* #define FORCE_TEST_SYSFS */
 
 /******************************************************************************/
 /* Debug logging */
