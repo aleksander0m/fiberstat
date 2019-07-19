@@ -368,6 +368,20 @@ teardown_hwmon_list (void)
     free (context.hwmon);
 }
 
+#if !defined FORCE_TEST_SYSFS
+static HwmonInfo *
+lookup_hwmon (const uint8_t *phandle)
+{
+    unsigned int i;
+
+    for (i = 0; i < context.n_hwmon; i++) {
+        if (memcmp (context.hwmon[i]->sfp_phandle, phandle, sizeof (context.hwmon[i]->sfp_phandle)) == 0)
+            return context.hwmon[i];
+    }
+    return NULL;
+}
+#endif
+
 static int
 setup_hwmon_list (void)
 {
@@ -454,13 +468,20 @@ setup_hwmon_list (void)
 /******************************************************************************/
 /* List of interfaces */
 
+#define NET_SYSFS_DIR    "/sys/class/net"
+#define NET_PHANDLE_FILE "of_node/sfp"
+
 typedef struct _InterfaceInfo {
-    char *name;
+    char      *name;
+    HwmonInfo *hwmon;
+
+#if defined FORCE_TEST_SYSFS
     char *tx_power_path;
     char *rx_power_path;
+#endif
+
     int   tx_power_fd;
     int   rx_power_fd;
-    /* fit values in the [-20,0] range */
     float tx_power;
     float rx_power;
 } InterfaceInfo;
@@ -472,8 +493,10 @@ interface_info_free (InterfaceInfo *iface)
         close (iface->tx_power_fd);
     if (!(iface->rx_power_fd < 0))
         close (iface->rx_power_fd);
+#if defined FORCE_TEST_SYSFS
     free (iface->tx_power_path);
     free (iface->rx_power_path);
+#endif
     free (iface->name);
     free (iface);
 }
@@ -491,53 +514,84 @@ teardown_interfaces (void)
 static int
 setup_interfaces (void)
 {
-    struct if_nameindex *if_nidxs;
-    struct if_nameindex *intf;
+    DIR           *d;
+    struct dirent *dir;
 
-    if_nidxs = if_nameindex ();
-    if (!if_nidxs)
+    d = opendir (NET_SYSFS_DIR);
+    if (!d)
         return -1;
 
-    for (intf = if_nidxs; intf->if_index || intf->if_name; intf++) {
+    while ((dir = readdir(d)) != NULL) {
         InterfaceInfo *iface;
+        char           path[PATH_MAX];
+        HwmonInfo     *hwmon = NULL;
+
+        if ((strcmp (dir->d_name, ".") == 0) || (strcmp (dir->d_name, "..") == 0))
+            continue;
+
+#if !defined FORCE_TEST_SYSFS
+        {
+            uint8_t phandle[4];
+            int     fd;
+            int     n_read;
+
+            snprintf (path, sizeof (path), NET_SYSFS_DIR "/%s/" NET_PHANDLE_FILE, dir->d_name);
+            fd = open (path, O_RDONLY);
+            if (fd < 0) {
+                log_debug ("net iface '%s' doesn't have sfp phandle file", dir->d_name);
+                continue;
+            }
+
+            n_read = read (fd, phandle, sizeof (phandle));
+            close (fd);
+
+            if (n_read < sizeof (phandle)) {
+                log_warning ("couldn't read net iface '%s' sfp phandle file", dir->d_name);
+                continue;
+            }
+
+            hwmon = lookup_hwmon (phandle);
+            if (!hwmon) {
+                log_warning ("couldn't match hwmon entry for net iface '%s'", dir->d_name);
+                continue;
+            }
+        }
+#endif
+
 
         iface = calloc (1, sizeof (InterfaceInfo));
         if (iface)
-            iface->name = strdup (intf->if_name);
+            iface->name = strdup (dir->d_name);
         if (!iface || !iface->name)
             return -2;
 
         log_info ("tracking interface '%s'...", iface->name);
 
+        iface->hwmon = hwmon;
         iface->tx_power = POWER_MIN;
         iface->rx_power = POWER_MIN;
         iface->tx_power_fd = -1;
         iface->rx_power_fd = -1;
 
-#if defined FORCE_TEST_SYSFS
-        {
-            char aux[256];
-
-            snprintf (aux, sizeof (aux), "/tmp/%s/" HWMON_TX_POWER_FILE, iface->name);
-            iface->tx_power_path = strdup (aux);
-            snprintf (aux, sizeof (aux), "/tmp/%s/" HWMON_RX_POWER_FILE, iface->name);
-            iface->rx_power_path = strdup (aux);
-        }
+#if !defined FORCE_TEST_SYSFS
+        iface->tx_power_fd = open (hwmon->tx_power_path, O_RDONLY);
+        iface->rx_power_fd = open (hwmon->rx_power_path, O_RDONLY);
+        if (iface->tx_power_fd < 0)
+            log_warning ("couldn't open TX power file for interface '%s' at %s", iface->name, hwmon->tx_power_path);
+        if (iface->rx_power_fd < 0)
+            log_warning ("couldn't open RX power file for interface '%s' at %s", iface->name, hwmon->rx_power_path);
+#else
+        snprintf (path, sizeof (path), "/tmp/%s/" HWMON_TX_POWER_FILE, iface->name);
+        iface->tx_power_path = strdup (path);
+        snprintf (path, sizeof (path), "/tmp/%s/" HWMON_RX_POWER_FILE, iface->name);
+        iface->rx_power_path = strdup (path);
+        iface->tx_power_fd = open (iface->tx_power_path, O_RDONLY);
+        iface->rx_power_fd = open (iface->rx_power_path, O_RDONLY);
+        if (iface->tx_power_fd < 0)
+            log_warning ("couldn't open TX power file for interface '%s' at %s", iface->name, iface->tx_power_path);
+        if (iface->rx_power_fd < 0)
+            log_warning ("couldn't open RX power file for interface '%s' at %s", iface->name, iface->rx_power_path);
 #endif
-
-        if (iface->tx_power_path) {
-            iface->tx_power_fd = open (iface->tx_power_path, O_RDONLY);
-            if (iface->tx_power_fd < 0)
-                log_warning ("couldn't open TX power file for interface '%s' at %s", iface->name, iface->tx_power_path);
-        } else
-            log_warning ("TX power file for interface '%s' undefined", iface->name);
-
-        if (iface->rx_power_path) {
-            iface->rx_power_fd = open (iface->rx_power_path, O_RDONLY);
-            if (iface->rx_power_fd < 0)
-                log_warning ("couldn't open RX power file for interface '%s' at %s", iface->name, iface->rx_power_path);
-        } else
-            log_warning ("RX power file for interface '%s' undefined", iface->name);
 
         context.n_ifaces++;
         context.ifaces = realloc (context.ifaces, sizeof (InterfaceInfo *) * context.n_ifaces);
@@ -545,8 +599,8 @@ setup_interfaces (void)
             return -3;
         context.ifaces[context.n_ifaces - 1] = iface;
     }
-    if_freenameindex(if_nidxs);
 
+    closedir (d);
     return 0;
 }
 
