@@ -719,7 +719,7 @@ print_box (int         x,
 }
 
 #define INTERFACE_WIDTH  (BOX_WIDTH + BOX_SEPARATION + BOX_WIDTH)
-#define INTERFACE_HEIGHT (BOX_HEIGHT + 3)
+#define INTERFACE_HEIGHT (BOX_HEIGHT + 4)
 
 static void
 print_iface_info (int         x,
@@ -736,6 +736,9 @@ print_iface_info (int         x,
     snprintf (buffer, sizeof (buffer), "link %s", operstate);
     x_center = x + (INTERFACE_WIDTH / 2) - (strlen (buffer) / 2);
     mvwprintw (context.content_win, y + 1, x_center, "%s", buffer);
+
+    /* force moving cursor to next line to make app running through minicom happy */
+    mvwprintw (context.content_win, y + 1, x_center, "");
 }
 
 static void
