@@ -634,11 +634,51 @@ static const char *BR[]  = { [BOX_CHARSET_ASCII] = "-", [BOX_CHARSET_UTF8] = "�
 
 static BoxCharset current_box_charset = BOX_CHARSET_ASCII;
 
+/*
+ * The information for one single interface is exposed as follows:
+ *   ┌────┐ ┌────┐
+ *   │    │ │    │
+ *   │    │ │    │
+ *   │    │ │    │
+ *   │    │ │    │   The height of the interface info section is 21:
+ *   │    │ │    │      box:        17 chars (15 content, 2 border)
+ *   │    │ │    │      box info:    2 chars
+ *   │    │ │    │      iface info:  2 chars
+ *   │    │ │    │
+ *   │    │ │    │   The minimum width of the interface info section is 13:
+ *   │    │ │    │      TX box:         6 chars (4 content, 2 border)
+ *   │    │ │    │      box separation: 1 char
+ *   │    │ │    │      RX box:         6 chars (4 content, 2 border)
+ *   │    │ │    │
+ *   │    │ │    │
+ *   └────┘ └────┘
+ *   -20,00 -17,50     ----> TX/RX values in dBm   (box info)
+ *   TX dBm RX dBm     ----> Box info              (box info)
+ *        lo           ----> Interface name        (iface info)
+ *   link unknown      ----> Link state            (iface info)
+ *
+ * The height of the bar is defined so that the whole interface takes
+ * a maximum of 21 chars, because on serial terminals a window height
+ * of 23 chars max is assumed as default and we don't want to take more
+ * than that:
+ *     1 char for app title
+ *     21 chars for interface
+ *     1 empty line to avoid cursor rewriting the last printed line
+ */
+
 #define BOX_CONTENT_WIDTH   4
-#define BOX_WIDTH           (BOX_CONTENT_WIDTH + 2)
-#define BOX_CONTENT_HEIGHT  16
-#define BOX_HEIGHT          (BOX_CONTENT_HEIGHT + 4)
+#define BOX_BORDER_WIDTH    2
+#define BOX_WIDTH           (BOX_CONTENT_WIDTH + BOX_BORDER_WIDTH)
+#define BOX_CONTENT_HEIGHT  15
+#define BOX_BORDER_HEIGHT   2
+#define BOX_INFO_HEIGHT     2
+#define BOX_HEIGHT          (BOX_CONTENT_HEIGHT + BOX_BORDER_HEIGHT + BOX_INFO_HEIGHT)
 #define BOX_SEPARATION      1
+
+#define IFACE_INFO_HEIGHT   2
+
+#define INTERFACE_WIDTH  (BOX_WIDTH + BOX_SEPARATION + BOX_WIDTH)
+#define INTERFACE_HEIGHT (BOX_HEIGHT + IFACE_INFO_HEIGHT)
 
 static void
 print_box (int         x,
@@ -710,6 +750,8 @@ print_box (int         x,
         mvwprintw (context.content_win, y+1+BOX_CONTENT_HEIGHT, x+1+i, "%s", HRZ[current_box_charset]);
     mvwprintw (context.content_win, y+1+BOX_CONTENT_HEIGHT, x+1+BOX_CONTENT_WIDTH, "%s", BR[current_box_charset]);
 
+    /* box info */
+
     x_center = x + (BOX_WIDTH / 2) - (strlen (label) / 2);
     mvwprintw (context.content_win, y+1+BOX_CONTENT_HEIGHT+2, x_center, "%s", label);
 
@@ -717,9 +759,6 @@ print_box (int         x,
     x_center = x + (BOX_WIDTH / 2) - (strlen (buf) / 2);
     mvwprintw (context.content_win, y+1+BOX_CONTENT_HEIGHT+1, x_center, "%s", buf);
 }
-
-#define INTERFACE_WIDTH  (BOX_WIDTH + BOX_SEPARATION + BOX_WIDTH)
-#define INTERFACE_HEIGHT (BOX_HEIGHT + 4)
 
 static void
 print_iface_info (int         x,
@@ -736,9 +775,6 @@ print_iface_info (int         x,
     snprintf (buffer, sizeof (buffer), "link %s", operstate);
     x_center = x + (INTERFACE_WIDTH / 2) - (strlen (buffer) / 2);
     mvwprintw (context.content_win, y + 1, x_center, "%s", buffer);
-
-    /* force moving cursor to next line to make app running through minicom happy */
-    mvwprintw (context.content_win, y + 1, x_center, "");
 }
 
 static void
@@ -768,10 +804,13 @@ print_interface (InterfaceInfo *iface, int x, int y)
     }
 #endif /* FORCE_TEST_LEVELS */
 
-    /* Power boxes */
+    /* Print TX/RX boxes and common interface info */
     print_box (x, y, tx_power, "TX dBm");
     print_box (x + BOX_WIDTH + BOX_SEPARATION, y, rx_power, "RX dBm");
     print_iface_info (x, y + BOX_HEIGHT, iface->name, iface->operstate);
+
+    /* force moving cursor to next line to make app running through minicom happy */
+    mvwprintw (context.content_win, y + INTERFACE_HEIGHT, 0, "");
 }
 
 /******************************************************************************/
