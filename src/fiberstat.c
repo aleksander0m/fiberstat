@@ -123,17 +123,49 @@ log_message (const char *level,
 #define DEFAULT_TIMEOUT_MS 1000
 static int timeout_ms = -1;
 
+static unsigned int  n_explicit_ifaces;
+static char        **explicit_ifaces;
+
+static int
+lookup_explicit_interface (const char *iface)
+{
+    unsigned int i;
+
+    for (i = 0; i < n_explicit_ifaces; i++) {
+        if (strcmp (iface, explicit_ifaces[i]) == 0)
+            return i;
+    }
+    return -1;
+}
+
+static int
+track_explicit_interface (const char *iface)
+{
+    if (lookup_explicit_interface (iface) >= 0)
+        return 0;
+
+    n_explicit_ifaces++;
+    explicit_ifaces = realloc (explicit_ifaces, sizeof (char *) * n_explicit_ifaces);
+    if (!explicit_ifaces)
+        return -1;
+    explicit_ifaces[n_explicit_ifaces - 1] = strdup (iface);
+    if (!explicit_ifaces[n_explicit_ifaces - 1])
+        return -2;
+    return 0;
+}
+
 static void
 print_help (void)
 {
     printf ("\n"
-            "Usage: " PROGRAM_NAME " <option>\n"
+            "Usage: " PROGRAM_NAME " [OPTION...]\n"
             "\n"
             "Common options:\n"
-            "  -t, --timeout    How often to reload values, in ms.\n"
-            "  -d, --debug      Verbose output in " DEBUG_LOG ".\n"
-            "  -h, --help       Show help.\n"
-            "  -v, --version    Show version.\n"
+            "  -i, --iface=[IFACE]  Monitor the specific interface.\n"
+            "  -t, --timeout        How often to reload values, in ms.\n"
+            "  -d, --debug          Verbose output in " DEBUG_LOG ".\n"
+            "  -h, --help           Show help.\n"
+            "  -v, --version        Show version.\n"
             "\n");
 }
 
@@ -147,6 +179,7 @@ print_version (void)
 }
 
 static const struct option longopts[] = {
+    { "iface",   required_argument, 0, 'i' },
     { "timeout", required_argument, 0, 't' },
     { "debug",   no_argument,       0, 'd' },
     { "version", no_argument,       0, 'v' },
@@ -163,12 +196,17 @@ setup_context (int argc, char *const *argv)
         int idx = 0;
         int iarg = 0;
 
-        iarg = getopt_long (argc, argv, "t:dhv", longopts, &idx);
-
+        iarg = getopt_long (argc, argv, "i:t:dhv", longopts, &idx);
         if (iarg < 0)
             break;
 
         switch (iarg) {
+        case 'i':
+            if (track_explicit_interface (optarg) < 0) {
+                fprintf (stderr, "error: couldn't track explicit interface to monitor");
+                exit (EXIT_FAILURE);
+            }
+            break;
         case 't':
             timeout_ms = atoi (optarg);
             if (timeout_ms <= 0) {
@@ -548,10 +586,13 @@ setup_interfaces (void)
         if ((strcmp (dir->d_name, ".") == 0) || (strcmp (dir->d_name, "..") == 0))
             continue;
 
+        if (n_explicit_ifaces && lookup_explicit_interface (dir->d_name) < 0)
+            continue;
+
 #if !defined FORCE_TEST_SYSFS
         {
             uint8_t phandle[4];
-            int     fd;
+            int     fd;<
             int     n_read;
 
             snprintf (path, sizeof (path), NET_SYSFS_DIR "/%s/" NET_PHANDLE_FILE, dir->d_name);
@@ -626,6 +667,24 @@ setup_interfaces (void)
     }
 
     closedir (d);
+
+    /* error if some of the explicit interfaces were not found */
+    if (n_explicit_ifaces && (n_explicit_ifaces != context.n_ifaces)) {
+        unsigned int i;
+
+        for (i = 0; i < n_explicit_ifaces; i++) {
+            unsigned int j;
+            bool         found = false;
+
+            for (j = 0; !found && (j < context.n_ifaces); j++) {
+                if (strcmp (explicit_ifaces[i], context.ifaces[j]->name) == 0)
+                    found = true;
+            }
+            if (!found)
+                log_error ("explicit interface requested doesn't exist: %s", explicit_ifaces[i]);
+        }
+        return -4;
+    }
 
 #if defined FORCE_TEST_MULTIPLY_IFACES
     {
