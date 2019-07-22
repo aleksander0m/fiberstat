@@ -62,6 +62,12 @@
  */
 /* #define FORCE_TEST_SYSFS */
 
+/* Define to multiply by this number of times the information of the currently
+ * available interfaces. E.g. if the system has 4 interfaces, a multiplier value
+ * of 3 will make it expose 12 instead.
+ */
+/* #define FORCE_TEST_MULTIPLY_IFACES 3 */
+
 /******************************************************************************/
 /* Debug logging */
 
@@ -565,7 +571,6 @@ setup_interfaces (void)
         }
 #endif
 
-
         iface = calloc (1, sizeof (InterfaceInfo));
         if (iface)
             iface->name = strdup (dir->d_name);
@@ -615,6 +620,39 @@ setup_interfaces (void)
     }
 
     closedir (d);
+
+#if defined FORCE_TEST_MULTIPLY_IFACES
+    {
+        unsigned int m;
+        unsigned int real_n_ifaces = context.n_ifaces;
+
+        for (m = 0; m < (FORCE_TEST_MULTIPLY_IFACES - 1); m++) {
+            unsigned int i;
+
+            for (i = 0; i < real_n_ifaces; i++) {
+                InterfaceInfo *iface;
+
+                iface = calloc (1, sizeof (InterfaceInfo));
+                if (!iface)
+                    return -2;
+                iface->name = strdup (context.ifaces[i]->name);
+                iface->tx_power = POWER_MIN;
+                iface->rx_power = POWER_MIN;
+                iface->tx_power_fd = -1;
+                iface->rx_power_fd = -1;
+                iface->operstate_fd = -1;
+
+                context.n_ifaces++;
+                context.ifaces = realloc (context.ifaces, sizeof (InterfaceInfo *) * context.n_ifaces);
+                if (!context.ifaces)
+                    return -3;
+                context.ifaces[context.n_ifaces - 1] = iface;
+            }
+        }
+    }
+#endif
+
+    log_debug ("detected %u interfaces", context.n_ifaces);
     return 0;
 }
 
