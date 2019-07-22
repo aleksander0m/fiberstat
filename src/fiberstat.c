@@ -187,6 +187,9 @@ setup_context (int argc, char *const *argv)
             exit (0);
         }
     }
+
+    if (timeout_ms < 0)
+        timeout_ms = DEFAULT_TIMEOUT_MS;
 }
 
 /******************************************************************************/
@@ -205,9 +208,12 @@ typedef struct {
     int     max_x;
     WINDOW *header_win;
     WINDOW *content_win;
+    bool    left_scroll_arrow;
+    bool    right_scroll_arrow;
 
     InterfaceInfo **ifaces;
     unsigned int    n_ifaces;
+    unsigned int    first_iface_index;
 
     HwmonInfo    **hwmon;
     unsigned int   n_hwmon;
@@ -255,7 +261,7 @@ setup_curses (void)
     }
 
     initscr ();
-    keypad(stdscr, TRUE);
+    keypad (stdscr, TRUE);
     nodelay (stdscr, TRUE);
     noecho ();
     cbreak ();
@@ -869,22 +875,29 @@ refresh_title (void)
     wrefresh (context.header_win);
 }
 
-#define MARGIN_HORIZONTAL                5
+/* The margin at left and right allows to place the scrolling
+ * arrows inside the margin (in the middle, at 2) */
+#define MARGIN_HORIZONTAL 5
+
 #define INTERFACE_SEPARATION_HORIZONTAL  3
 #define INTERFACE_SEPARATION_VERTICAL    3
 
 static void
 refresh_contents (void)
 {
-    unsigned int i, x, y;
+    unsigned int i, n, x, y;
     unsigned int total_width;
+    unsigned int total_height;
     unsigned int x_initial;
     unsigned int n_ifaces_per_row;
     unsigned int n_ifaces_per_column;
     unsigned int n_ifaces_per_window;
+    unsigned int n_rows;
+    unsigned int n_columns;
     unsigned int content_max_width;
     unsigned int content_max_height;
     unsigned int last_iface_index;
+    unsigned int visible_ifaces;
 
     content_max_width = (context.max_x - (MARGIN_HORIZONTAL * 2));
     log_debug ("width: window %u, interface %u, content max %u",
@@ -930,25 +943,69 @@ refresh_contents (void)
 
     /* totals... */
     n_ifaces_per_window = n_ifaces_per_row * n_ifaces_per_column;
-    log_debug ("window allows up to %u interfaces in %u rows and %u columns",
+    log_debug ("window allows up to %u interfaces (%u per rows and %u per column)",
                n_ifaces_per_window, n_ifaces_per_row, n_ifaces_per_column);
 
-    /* compute total width in order to center in the interface */
-    if (context.n_ifaces < n_ifaces_per_row)
-        total_width = (context.n_ifaces * INTERFACE_WIDTH) + ((context.n_ifaces - 1) * INTERFACE_SEPARATION_HORIZONTAL);
-    else
-        total_width = (n_ifaces_per_row * INTERFACE_WIDTH) + ((n_ifaces_per_row - 1) * INTERFACE_SEPARATION_HORIZONTAL);
-    log_debug ("total width: %u", total_width);
+    /* we skip all interfaces that have been scrolled */
+    visible_ifaces = (context.n_ifaces - context.first_iface_index);
 
-    /* don't try to print interfaces that don't fit */
-    last_iface_index = (context.n_ifaces > n_ifaces_per_window ? n_ifaces_per_window : context.n_ifaces);
+    /* compute amount of rows and columns we're printing */
+    n_rows = visible_ifaces / n_ifaces_per_row;
+    if (n_rows > 0) {
+        if (visible_ifaces % n_ifaces_per_row > 0)
+            n_rows++;
+        if (n_rows > n_ifaces_per_column)
+            n_rows = n_ifaces_per_column;
+    } else
+        n_rows = 1;
+    n_columns = (visible_ifaces > n_ifaces_per_row) ? n_ifaces_per_row : visible_ifaces;
+    log_debug ("printing %u rows with up to %u interfaces per row",
+               n_rows, n_columns);
+
+    /* compute total width and height in order to center elements in the interface */
+    total_width = (n_columns * INTERFACE_WIDTH) + ((n_columns - 1) * INTERFACE_SEPARATION_HORIZONTAL);
+    total_height = (n_rows * INTERFACE_HEIGHT) + ((n_rows - 1) * INTERFACE_SEPARATION_VERTICAL);
+    log_debug ("total width %u, total height %u", total_width, total_height);
+
+    /* check if we need scrolling support */
+    context.left_scroll_arrow = false;
+    context.right_scroll_arrow = false;
+    if ((context.first_iface_index > 0) || (visible_ifaces > n_ifaces_per_window)) {
+        last_iface_index = context.first_iface_index + n_ifaces_per_window;
+        if (last_iface_index >= context.n_ifaces)
+            last_iface_index = context.n_ifaces;
+        else
+            context.right_scroll_arrow = true;
+        if (context.first_iface_index > 0)
+            context.left_scroll_arrow = true;
+    } else
+        last_iface_index = context.n_ifaces;
+
+    /* print scrolling arrows if needed */
+    if (context.left_scroll_arrow) {
+        wattron(context.content_win, A_BOLD);
+        mvwprintw (context.content_win,
+                   total_height / 2,
+                   (context.max_x / 2) - (total_width / 2) - MARGIN_HORIZONTAL + 2,
+                   "<");
+        wattroff(context.content_win, A_BOLD);
+    }
+
+    if (context.right_scroll_arrow) {
+        wattron(context.content_win, A_BOLD);
+        mvwprintw (context.content_win,
+                   total_height / 2,
+                   (context.max_x / 2) + (total_width / 2) + MARGIN_HORIZONTAL - 2,
+                   ">");
+        wattroff(context.content_win, A_BOLD);
+    }
 
     x_initial = x = (context.max_x / 2) - (total_width / 2);
     y = 0;
 
-    for (i = 0; i < last_iface_index; i++) {
+    for (n = 0, i = context.first_iface_index; i < last_iface_index; i++, n++) {
         print_interface (context.ifaces[i], x, y);
-        if (((i + 1) % n_ifaces_per_row) == 0) {
+        if (((n + 1) % n_ifaces_per_row) == 0) {
             x = x_initial;
             y += (INTERFACE_HEIGHT + INTERFACE_SEPARATION_VERTICAL);
         } else {
@@ -1052,6 +1109,8 @@ reload_values (void)
 /******************************************************************************/
 /* Main */
 
+#define QUIT_SHORTCUT 'q'
+
 static void
 setup_locale (void)
 {
@@ -1062,6 +1121,24 @@ setup_locale (void)
     current = setlocale (LC_CTYPE, NULL);
     if (current && strstr (current, "utf8"))
         current_box_charset = BOX_CHARSET_UTF8;
+}
+
+static int
+wait_for_input (void)
+{
+    fd_set         input_set;
+    struct timeval menu_timeout;
+
+    menu_timeout.tv_sec = timeout_ms / 1000;
+    menu_timeout.tv_usec = (timeout_ms % 1000) * 1000;
+
+    FD_ZERO (&input_set);
+    FD_SET (0, &input_set);
+
+    if (select (1, &input_set, NULL, NULL, &menu_timeout) < 0)
+        return -1;
+
+    return getch ();
 }
 
 int main (int argc, char *const *argv)
@@ -1106,7 +1183,28 @@ int main (int argc, char *const *argv)
             context.refresh_contents = false;
         }
 
-        usleep ((timeout_ms > 0 ? timeout_ms : DEFAULT_TIMEOUT_MS) * 1000);
+        switch (wait_for_input ()) {
+            case QUIT_SHORTCUT:
+                context.stop = true;
+                break;
+            case KEY_LEFT:
+                if (context.left_scroll_arrow) {
+                    assert (context.first_iface_index > 0);
+                    context.first_iface_index--;
+                    context.refresh_contents = true;
+                    log_debug ("scroll left, first interface index %u", context.first_iface_index);
+                }
+                break;
+            case KEY_RIGHT:
+                if (context.right_scroll_arrow) {
+                    context.first_iface_index++;
+                    context.refresh_contents = true;
+                    log_debug ("scroll right, first interface index %u", context.first_iface_index);
+                }
+                break;
+            default:
+                break;
+        }
     } while (!context.stop);
 
     teardown_interfaces ();
