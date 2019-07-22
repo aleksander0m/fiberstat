@@ -386,16 +386,22 @@ power_to_percentage (float power)
 /******************************************************************************/
 /* List of hwmon entries */
 
-#define HWMON_SYSFS_DIR     "/sys/class/hwmon"
-#define HWMON_TX_POWER_FILE "power1_input"
-#define HWMON_RX_POWER_FILE "power2_input"
-#define HWMON_PHANDLE_FILE  "of_node/phandle"
+#define PHANDLE_SIZE_BYTES 4
+
+#define HWMON_SYSFS_DIR              "/sys/class/hwmon"
+#define HWMON_POWER1_INPUT_FILE      "power1_input"
+#define HWMON_POWER2_INPUT_FILE      "power2_input"
+#define HWMON_POWER1_LABEL_FILE      "power1_label"
+#define HWMON_POWER2_LABEL_FILE      "power2_label"
+#define HWMON_TX_POWER_LABEL_CONTENT "TX_power"
+#define HWMON_RX_POWER_LABEL_CONTENT "RX_power"
+#define HWMON_PHANDLE_FILE           "of_node/phandle"
 
 typedef struct _HwmonInfo {
     char    *name;
     char    *tx_power_path;
     char    *rx_power_path;
-    uint8_t  sfp_phandle[4];
+    uint8_t  sfp_phandle[PHANDLE_SIZE_BYTES];
 } HwmonInfo;
 
 static void
@@ -424,12 +430,119 @@ lookup_hwmon (const uint8_t *phandle)
     unsigned int i;
 
     for (i = 0; i < context.n_hwmon; i++) {
-        if (memcmp (context.hwmon[i]->sfp_phandle, phandle, sizeof (context.hwmon[i]->sfp_phandle)) == 0)
+        if (memcmp (context.hwmon[i]->sfp_phandle, phandle, PHANDLE_SIZE_BYTES) == 0)
             return context.hwmon[i];
     }
     return NULL;
 }
 #endif
+
+static bool
+check_file_contents (const char *path,
+                     const char *contents)
+{
+    int    fd;
+    bool   result;
+    int    n_read;
+    char   aux[255];
+    size_t contents_size;
+
+    fd = open (path, O_RDONLY);
+    if (fd < 0)
+        return false;
+
+    if (!contents) {
+        result = true;
+        goto out;
+    }
+
+    contents_size = strlen (contents);
+    n_read = read (fd, aux, contents_size);
+    result = ((n_read == contents_size) && strncmp (aux, contents, n_read) == 0);
+
+out:
+    close (fd);
+    return result;
+}
+
+static bool
+check_file_exists (const char *path)
+{
+    return check_file_contents (path, NULL);
+}
+
+static bool
+load_power_input_file_paths (const char  *hwmon,
+                             char       **out_tx_file_path,
+                             char       **out_rx_file_path)
+{
+    char  path[PATH_MAX];
+    char *tx_file_path = NULL;
+    char *rx_file_path = NULL;
+
+    snprintf (path, sizeof (path), HWMON_SYSFS_DIR "/%s/" HWMON_POWER1_LABEL_FILE, hwmon);
+    if (!check_file_contents (path, HWMON_TX_POWER_LABEL_CONTENT)) {
+        log_debug ("hwmon '%s' doesn't have expected tx power label file", hwmon);
+        goto out;
+    }
+
+    snprintf (path, sizeof (path), HWMON_SYSFS_DIR "/%s/" HWMON_POWER2_LABEL_FILE, hwmon);
+    if (!check_file_contents (path, HWMON_RX_POWER_LABEL_CONTENT)) {
+        log_debug ("hwmon '%s' doesn't have expected rx power label file", hwmon);
+        goto out;
+    }
+
+    snprintf (path, sizeof (path), HWMON_SYSFS_DIR "/%s/" HWMON_POWER1_INPUT_FILE, hwmon);
+    if (!check_file_exists (path)) {
+        log_debug ("hwmon '%s' doesn't have tx power input file", hwmon);
+        goto out;
+    }
+    tx_file_path = strdup (path);
+
+    snprintf (path, sizeof (path), HWMON_SYSFS_DIR "/%s/" HWMON_POWER2_INPUT_FILE, hwmon);
+    if (!check_file_exists (path)) {
+        log_debug ("hwmon '%s' doesn't have rx power input file", hwmon);
+        goto out;
+    }
+    rx_file_path = strdup (path);
+
+out:
+    if (tx_file_path && rx_file_path) {
+        *out_tx_file_path = tx_file_path;
+        *out_rx_file_path = rx_file_path;
+        return true;
+    }
+
+    free (tx_file_path);
+    free (rx_file_path);
+    return false;
+}
+
+static bool
+load_hwmon_phandle (const char *hwmon,
+                    uint8_t    *phandle)
+{
+    char path[PATH_MAX];
+    int  fd;
+    int  n_read;
+
+    snprintf (path, sizeof (path), HWMON_SYSFS_DIR "/%s/" HWMON_PHANDLE_FILE, hwmon);
+    fd = open (path, O_RDONLY);
+    if (fd < 0) {
+        log_debug ("hwmon '%s' doesn't have sfp phandle file", hwmon);
+        return false;
+    }
+
+    n_read = read (fd, phandle, PHANDLE_SIZE_BYTES);
+    close (fd);
+
+    if (n_read < PHANDLE_SIZE_BYTES) {
+        log_warning ("couldn't read hwmon '%s' sfp phandle file", hwmon);
+        return false;
+    }
+
+    return true;
+}
 
 static int
 setup_hwmon_list (void)
@@ -442,47 +555,19 @@ setup_hwmon_list (void)
         return -1;
 
     while ((dir = readdir(d)) != NULL) {
-        char       path1[PATH_MAX];
-        char       path2[PATH_MAX];
-        char       path3[PATH_MAX];
-        uint8_t    phandle[4];
+        char      *tx_file_path = NULL;
+        char      *rx_file_path = NULL;
+        uint8_t    phandle[PHANDLE_SIZE_BYTES];
         HwmonInfo *info;
-        int        fd;
-        int        n_read;
 
         if ((strcmp (dir->d_name, ".") == 0) || (strcmp (dir->d_name, "..") == 0))
             continue;
 
-        snprintf (path1, sizeof (path1), HWMON_SYSFS_DIR "/%s/" HWMON_TX_POWER_FILE, dir->d_name);
-        fd = open (path1, O_RDONLY);
-        if (fd < 0) {
-            log_debug ("hwmon '%s' doesn't have tx power file", dir->d_name);
+        if (!load_power_input_file_paths (dir->d_name, &tx_file_path, &rx_file_path))
             continue;
-        }
-        close (fd);
 
-        snprintf (path2, sizeof (path2), HWMON_SYSFS_DIR "/%s/" HWMON_RX_POWER_FILE, dir->d_name);
-        fd = open (path2, O_RDONLY);
-        if (fd < 0) {
-            log_debug ("hwmon '%s' doesn't have rx power file", dir->d_name);
+        if (!load_hwmon_phandle (dir->d_name, phandle))
             continue;
-        }
-        close (fd);
-
-        snprintf (path3, sizeof (path3), HWMON_SYSFS_DIR "/%s/" HWMON_PHANDLE_FILE, dir->d_name);
-        fd = open (path3, O_RDONLY);
-        if (fd < 0) {
-            log_debug ("hwmon '%s' doesn't have sfp phandle file", dir->d_name);
-            continue;
-        }
-
-        n_read = read (fd, phandle, sizeof (phandle));
-        close (fd);
-
-        if (n_read < sizeof (phandle)) {
-            log_warning ("couldn't read hwmon '%s' sfp phandle file", dir->d_name);
-            continue;
-        }
 
         /* valid hwmon entry */
 
@@ -491,8 +576,8 @@ setup_hwmon_list (void)
             return -2;
 
         info->name = strdup (dir->d_name);
-        info->tx_power_path = strdup (path1);
-        info->rx_power_path = strdup (path2);
+        info->tx_power_path = tx_file_path;
+        info->rx_power_path = rx_file_path;
         memcpy (info->sfp_phandle, phandle, sizeof (phandle));
 
         context.n_hwmon++;
@@ -568,6 +653,36 @@ teardown_interfaces (void)
     free (context.ifaces);
 }
 
+#if !defined FORCE_TEST_SYSFS
+
+static bool
+load_interface_phandle (const char *iface,
+                        uint8_t    *phandle)
+{
+    char path[PATH_MAX];
+    int  fd;
+    int  n_read;
+
+    snprintf (path, sizeof (path), NET_SYSFS_DIR "/%s/" NET_PHANDLE_FILE, iface);
+    fd = open (path, O_RDONLY);
+    if (fd < 0) {
+        log_debug ("iface '%s' doesn't have sfp phandle file", iface);
+        return false;
+    }
+
+    n_read = read (fd, phandle, PHANDLE_SIZE_BYTES);
+    close (fd);
+
+    if (n_read < PHANDLE_SIZE_BYTES) {
+        log_warning ("couldn't read iface '%s' sfp phandle file", iface);
+        return false;
+    }
+
+    return true;
+}
+
+#endif
+
 static int
 setup_interfaces (void)
 {
@@ -591,24 +706,10 @@ setup_interfaces (void)
 
 #if !defined FORCE_TEST_SYSFS
         {
-            uint8_t phandle[4];
-            int     fd;<
-            int     n_read;
+            uint8_t phandle[PHANDLE_SIZE_BYTES];
 
-            snprintf (path, sizeof (path), NET_SYSFS_DIR "/%s/" NET_PHANDLE_FILE, dir->d_name);
-            fd = open (path, O_RDONLY);
-            if (fd < 0) {
-                log_debug ("net iface '%s' doesn't have sfp phandle file", dir->d_name);
+            if (!load_interface_phandle (dir->d_name, phandle))
                 continue;
-            }
-
-            n_read = read (fd, phandle, sizeof (phandle));
-            close (fd);
-
-            if (n_read < sizeof (phandle)) {
-                log_warning ("couldn't read net iface '%s' sfp phandle file", dir->d_name);
-                continue;
-            }
 
             hwmon = lookup_hwmon (phandle);
             if (!hwmon) {
@@ -641,9 +742,9 @@ setup_interfaces (void)
         if (iface->rx_power_fd < 0)
             log_warning ("couldn't open RX power file for interface '%s' at %s", iface->name, hwmon->rx_power_path);
 #else
-        snprintf (path, sizeof (path), "/tmp/%s/" HWMON_TX_POWER_FILE, iface->name);
+        snprintf (path, sizeof (path), "/tmp/%s/" HWMON_POWER1_INPUT_FILE, iface->name);
         iface->tx_power_path = strdup (path);
-        snprintf (path, sizeof (path), "/tmp/%s/" HWMON_RX_POWER_FILE, iface->name);
+        snprintf (path, sizeof (path), "/tmp/%s/" HWMON_POWER2_INPUT_FILE, iface->name);
         iface->rx_power_path = strdup (path);
         iface->tx_power_fd = open (iface->tx_power_path, O_RDONLY);
         iface->rx_power_fd = open (iface->rx_power_path, O_RDONLY);
