@@ -880,35 +880,73 @@ refresh_contents (void)
     unsigned int total_width;
     unsigned int x_initial;
     unsigned int n_ifaces_per_row;
+    unsigned int n_ifaces_per_column;
+    unsigned int n_ifaces_per_window;
     unsigned int content_max_width;
+    unsigned int content_max_height;
+    unsigned int last_iface_index;
 
     content_max_width = (context.max_x - (MARGIN_HORIZONTAL * 2));
-    log_debug ("window width: %u", context.max_x);
-    log_debug ("interface width: %u", INTERFACE_WIDTH);
-    log_debug ("content max width: %u", content_max_width);
+    log_debug ("width: window %u, interface %u, content max %u",
+               context.max_x, INTERFACE_WIDTH, content_max_width);
+
+    content_max_height = context.max_y;
+    log_debug ("height: window %u, interface %u, content max %u",
+               context.max_y, INTERFACE_HEIGHT, content_max_height);
 
     werase (context.content_win);
 
+    /* compute how many interfaces we can print in the window */
+
+    /* rows... */
     n_ifaces_per_row = 0;
     while (1) {
         unsigned int next = ((n_ifaces_per_row + 1) * INTERFACE_WIDTH) + ((n_ifaces_per_row) * INTERFACE_SEPARATION_HORIZONTAL);
         if (next >= content_max_width)
             break;
-        total_width = next;
         n_ifaces_per_row++;
     }
     log_debug ("number of interfaces per row: %u", n_ifaces_per_row);
 
+    if (n_ifaces_per_row == 0) {
+        log_warning ("window doesn't allow one full interface per row: forcing it anyway");
+        n_ifaces_per_row = 1;
+    }
+
+    /* columns... */
+    n_ifaces_per_column = 0;
+    while (1) {
+        unsigned int next = ((n_ifaces_per_column + 1) * INTERFACE_HEIGHT) + ((n_ifaces_per_column) * INTERFACE_SEPARATION_VERTICAL);
+        if (next >= content_max_height)
+            break;
+        n_ifaces_per_column++;
+    }
+    log_debug ("number of interfaces per column: %u", n_ifaces_per_column);
+
+    if (n_ifaces_per_column == 0) {
+        log_warning ("window doesn't allow one full interface per column: forcing it anyway");
+        n_ifaces_per_column = 1;
+    }
+
+    /* totals... */
+    n_ifaces_per_window = n_ifaces_per_row * n_ifaces_per_column;
+    log_debug ("window allows up to %u interfaces in %u rows and %u columns",
+               n_ifaces_per_window, n_ifaces_per_row, n_ifaces_per_column);
+
+    /* compute total width in order to center in the interface */
     if (context.n_ifaces < n_ifaces_per_row)
         total_width = (context.n_ifaces * INTERFACE_WIDTH) + ((context.n_ifaces - 1) * INTERFACE_SEPARATION_HORIZONTAL);
     else
         total_width = (n_ifaces_per_row * INTERFACE_WIDTH) + ((n_ifaces_per_row - 1) * INTERFACE_SEPARATION_HORIZONTAL);
     log_debug ("total width: %u", total_width);
 
+    /* don't try to print interfaces that don't fit */
+    last_iface_index = (context.n_ifaces > n_ifaces_per_window ? n_ifaces_per_window : context.n_ifaces);
+
     x_initial = x = (context.max_x / 2) - (total_width / 2);
     y = 0;
 
-    for (i = 0; i < context.n_ifaces; i++) {
+    for (i = 0; i < last_iface_index; i++) {
         print_interface (context.ifaces[i], x, y);
         if (((i + 1) % n_ifaces_per_row) == 0) {
             x = x_initial;
