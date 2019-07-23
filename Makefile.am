@@ -27,3 +27,5 @@ ChangeLog:
 	else \
 		touch $@ ; \
 	fi
+
+EXTRA_DIST = README.md
