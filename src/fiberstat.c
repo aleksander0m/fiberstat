@@ -372,7 +372,7 @@ setup_windows (void)
 #define POWER_MAX    0.0
 #define POWER_GOOD -10.0
 #define POWER_BAD  -22.0
-#define POWER_MIN  -20.0
+#define POWER_MIN  -25.0
 #define POWER_UNK  -40.0
 
 static int
