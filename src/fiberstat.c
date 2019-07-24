@@ -370,7 +370,7 @@ setup_windows (void)
 
 /* Expected TX/RX power threshold */
 #define POWER_MAX    0.0
-#define POWER_GOOD -10.0
+#define POWER_GOOD -19.0
 #define POWER_BAD  -22.0
 #define POWER_MIN  -25.0
 #define POWER_UNK  -40.0
