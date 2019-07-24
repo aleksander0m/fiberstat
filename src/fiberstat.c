@@ -324,6 +324,7 @@ typedef enum {
     COLOR_PAIR_BOX_CONTENT_GREEN,
     COLOR_PAIR_BOX_CONTENT_YELLOW,
     COLOR_PAIR_BOX_CONTENT_RED,
+    COLOR_PAIR_BOX_CONTENT_WHITE,
 } ColorPair;
 
 static void
@@ -341,6 +342,7 @@ setup_windows (void)
         init_pair (COLOR_PAIR_BOX_CONTENT_GREEN, COLOR_BLACK, COLOR_GREEN);
         init_pair (COLOR_PAIR_BOX_CONTENT_YELLOW, COLOR_BLACK, COLOR_YELLOW);
         init_pair (COLOR_PAIR_BOX_CONTENT_RED, COLOR_BLACK, COLOR_RED);
+        init_pair (COLOR_PAIR_BOX_CONTENT_WHITE, COLOR_BLACK, COLOR_WHITE);
         bkgd (COLOR_PAIR (COLOR_PAIR_MAIN));
     }
 
@@ -367,9 +369,9 @@ setup_windows (void)
 /******************************************************************************/
 
 /* Expected TX/RX power threshold */
-#define POWER_MAX   0.0
+#define POWER_MAX    0.0
 #define POWER_GOOD -10.0
-#define POWER_BAD  -15.0
+#define POWER_BAD  -22.0
 #define POWER_MIN  -20.0
 #define POWER_UNK  -40.0
 
@@ -888,10 +890,11 @@ static void
 print_box (int         x,
            int         y,
            float       power,
+           bool        apply_thresholds,
            const char *label)
 {
     static int    good_level_fill_height = 0;
-    static int    bad_level_fill_height  = 0;
+    static int    bad_level_fill_height = 0;
     char          buf[32];
     unsigned int  i;
     unsigned int  j;
@@ -901,7 +904,7 @@ print_box (int         x,
     unsigned int  fill_percent;
     unsigned int  x_center;
 
-    if (!good_level_fill_height) {
+    if (good_level_fill_height == 0) {
         fill_percent = power_to_percentage (POWER_GOOD);
         fill_scaled = ((float) fill_percent * BOX_CONTENT_HEIGHT) / 100.0;
         fill_height = floor (fill_scaled + 0.5);
@@ -910,7 +913,7 @@ print_box (int         x,
         good_level_fill_height = fill_height;
     }
 
-    if (!bad_level_fill_height) {
+    if (bad_level_fill_height == 0) {
         fill_percent = power_to_percentage (POWER_BAD);
         fill_scaled = ((float) fill_percent * BOX_CONTENT_HEIGHT) / 100.0;
         fill_height = floor (fill_scaled + 0.5);
@@ -935,12 +938,15 @@ print_box (int         x,
         if (i >= (BOX_CONTENT_HEIGHT - fill_height)) {
             int row_color;
 
-            if (i >= (BOX_CONTENT_HEIGHT - bad_level_fill_height))
-                row_color = COLOR_PAIR (COLOR_PAIR_BOX_CONTENT_RED);
-            else if (i >= (BOX_CONTENT_HEIGHT - good_level_fill_height))
-                row_color = COLOR_PAIR (COLOR_PAIR_BOX_CONTENT_YELLOW);
-            else
-                row_color = COLOR_PAIR (COLOR_PAIR_BOX_CONTENT_GREEN);
+            if (apply_thresholds) {
+                if (i >= (BOX_CONTENT_HEIGHT - bad_level_fill_height))
+                    row_color = COLOR_PAIR (COLOR_PAIR_BOX_CONTENT_RED);
+                else if (i >= (BOX_CONTENT_HEIGHT - good_level_fill_height))
+                    row_color = COLOR_PAIR (COLOR_PAIR_BOX_CONTENT_YELLOW);
+                else
+                    row_color = COLOR_PAIR (COLOR_PAIR_BOX_CONTENT_GREEN);
+            } else
+                row_color = COLOR_PAIR (COLOR_PAIR_BOX_CONTENT_WHITE);
 
             wattron (context.content_win, row_color);
             for (j = 0; j < BOX_CONTENT_WIDTH; j++)
@@ -1009,8 +1015,8 @@ print_interface (InterfaceInfo *iface, int x, int y)
 #endif /* FORCE_TEST_LEVELS */
 
     /* Print TX/RX boxes and common interface info */
-    print_box (x, y, tx_power, "TX dBm");
-    print_box (x + BOX_WIDTH + BOX_SEPARATION, y, rx_power, "RX dBm");
+    print_box (x, y, tx_power, false, "TX dBm");
+    print_box (x + BOX_WIDTH + BOX_SEPARATION, y, rx_power, true, "RX dBm");
     print_iface_info (x, y + BOX_HEIGHT, iface->name, iface->operstate);
 
     /* force moving cursor to next line to make app running through minicom happy */
