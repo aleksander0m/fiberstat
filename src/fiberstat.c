@@ -991,7 +991,11 @@ print_iface_info (int         x,
     x_center = x + (INTERFACE_WIDTH / 2) - (strlen (name) / 2);
     mvwprintw (context.content_win, y, x_center, "%s", name);
 
-    snprintf (buffer, sizeof (buffer), "link %s", operstate);
+    /* lowerlayerdown is too long and messes up the UI, so limit it a bit */
+    if (strcmp (operstate, "lowerlayerdown") == 0)
+        snprintf (buffer, sizeof (buffer), "link lowerdown");
+    else
+        snprintf (buffer, sizeof (buffer), "link %s", operstate);
     x_center = x + (INTERFACE_WIDTH / 2) - (strlen (buffer) / 2);
     mvwprintw (context.content_win, y + 1, x_center, "%s", buffer);
 }
