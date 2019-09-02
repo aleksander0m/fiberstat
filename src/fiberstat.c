@@ -686,6 +686,12 @@ load_interface_phandle (const char *iface,
 #endif
 
 static int
+compare_interface (const void *a, const void *b)
+{
+    return strcmp ((*((InterfaceInfo **)a))->name, (*((InterfaceInfo **)b))->name);
+}
+
+static int
 setup_interfaces (void)
 {
     DIR           *d;
@@ -819,6 +825,9 @@ setup_interfaces (void)
         }
     }
 #endif
+
+    /* sort array by interface name */
+    qsort (context.ifaces, context.n_ifaces, sizeof (InterfaceInfo *), compare_interface);
 
     log_debug ("detected %u interfaces", context.n_ifaces);
     return 0;
