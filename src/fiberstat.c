@@ -166,6 +166,10 @@ print_help (void)
             "  -d, --debug          Verbose output in " DEBUG_LOG ".\n"
             "  -h, --help           Show help.\n"
             "  -v, --version        Show version.\n"
+            "\n"
+            "Notes:\n"
+            "  * -i,--iface may be given multiple times to specify more than\n"
+            "    one explicit interface to monitor.\n"
             "\n");
 }
 
