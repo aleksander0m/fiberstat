@@ -325,10 +325,14 @@ typedef enum {
     COLOR_PAIR_MAIN = 1,
     COLOR_PAIR_TITLE_TEXT,
     COLOR_PAIR_SHORTCUT_TEXT,
-    COLOR_PAIR_BOX_CONTENT_GREEN,
-    COLOR_PAIR_BOX_CONTENT_YELLOW,
-    COLOR_PAIR_BOX_CONTENT_RED,
-    COLOR_PAIR_BOX_CONTENT_WHITE,
+    COLOR_PAIR_BOX_BACKGROUND_GREEN,
+    COLOR_PAIR_BOX_BACKGROUND_YELLOW,
+    COLOR_PAIR_BOX_BACKGROUND_RED,
+    COLOR_PAIR_BOX_BACKGROUND_WHITE,
+    COLOR_PAIR_BOX_TEXT_GREEN,
+    COLOR_PAIR_BOX_TEXT_YELLOW,
+    COLOR_PAIR_BOX_TEXT_RED,
+    COLOR_PAIR_BOX_TEXT_WHITE,
 } ColorPair;
 
 static void
@@ -340,13 +344,17 @@ setup_windows (void)
         once = 1;
         start_color ();
         curs_set (0);
-        init_pair (COLOR_PAIR_MAIN, COLOR_WHITE, COLOR_BLACK);
-        init_pair (COLOR_PAIR_TITLE_TEXT, COLOR_GREEN, COLOR_BLACK);
-        init_pair (COLOR_PAIR_SHORTCUT_TEXT, COLOR_CYAN, COLOR_BLACK);
-        init_pair (COLOR_PAIR_BOX_CONTENT_GREEN, COLOR_BLACK, COLOR_GREEN);
-        init_pair (COLOR_PAIR_BOX_CONTENT_YELLOW, COLOR_BLACK, COLOR_YELLOW);
-        init_pair (COLOR_PAIR_BOX_CONTENT_RED, COLOR_BLACK, COLOR_RED);
-        init_pair (COLOR_PAIR_BOX_CONTENT_WHITE, COLOR_BLACK, COLOR_WHITE);
+        init_pair (COLOR_PAIR_MAIN,                  COLOR_WHITE,  COLOR_BLACK);
+        init_pair (COLOR_PAIR_TITLE_TEXT,            COLOR_GREEN,  COLOR_BLACK);
+        init_pair (COLOR_PAIR_SHORTCUT_TEXT,         COLOR_CYAN,   COLOR_BLACK);
+        init_pair (COLOR_PAIR_BOX_BACKGROUND_GREEN,  COLOR_BLACK,  COLOR_GREEN);
+        init_pair (COLOR_PAIR_BOX_BACKGROUND_YELLOW, COLOR_BLACK,  COLOR_YELLOW);
+        init_pair (COLOR_PAIR_BOX_BACKGROUND_RED,    COLOR_BLACK,  COLOR_RED);
+        init_pair (COLOR_PAIR_BOX_BACKGROUND_WHITE,  COLOR_BLACK,  COLOR_WHITE);
+        init_pair (COLOR_PAIR_BOX_TEXT_GREEN,        COLOR_GREEN,  COLOR_BLACK);
+        init_pair (COLOR_PAIR_BOX_TEXT_YELLOW,       COLOR_YELLOW, COLOR_BLACK);
+        init_pair (COLOR_PAIR_BOX_TEXT_RED,          COLOR_RED,    COLOR_BLACK);
+        init_pair (COLOR_PAIR_BOX_TEXT_WHITE,        COLOR_WHITE,  COLOR_BLACK);
         bkgd (COLOR_PAIR (COLOR_PAIR_MAIN));
     }
 
@@ -372,21 +380,24 @@ setup_windows (void)
 
 /******************************************************************************/
 
-/* Expected TX/RX power threshold */
+/* Expected TX/RX power threshold
+ * The GOOD/BAD thresholds are chosen so that the 'ignored partial' values
+ * computed while on high res are 0, so that we have "full blocks" printed
+ * with red and yellow. */
 #define POWER_MAX    0.0
-#define POWER_GOOD -19.0
-#define POWER_BAD  -22.0
+#define POWER_GOOD -18.4
+#define POWER_BAD  -21.7
 #define POWER_MIN  -25.0
 #define POWER_UNK  -40.0
 
-static int
+static float
 power_to_percentage (float power)
 {
     if (power >= POWER_MAX)
-        return 100;
+        return 100.0;
     if (power <= POWER_MIN)
-        return 0;
-    return floor ((100.0 * (power - POWER_MIN) / (POWER_MAX - POWER_MIN)) + 0.5);
+        return 0.0;
+    return 100.0 * (power - POWER_MIN) / (POWER_MAX - POWER_MIN);
 }
 
 /******************************************************************************/
@@ -851,6 +862,10 @@ static const char *TR[]  = { [BOX_CHARSET_ASCII] = "-", [BOX_CHARSET_UTF8] = "�
 static const char *BL[]  = { [BOX_CHARSET_ASCII] = "-", [BOX_CHARSET_UTF8] = "└" };
 static const char *BR[]  = { [BOX_CHARSET_ASCII] = "-", [BOX_CHARSET_UTF8] = "┘" };
 
+/* When using UTF-8, we can use a block fill from 1/8 to 8/8 */
+static const int   RESOLUTION[] = { [BOX_CHARSET_ASCII] = 1, [BOX_CHARSET_UTF8] = 8 };
+static const char *BLK[] = { "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█" };
+
 static BoxCharset current_box_charset = BOX_CHARSET_ASCII;
 
 /*
@@ -906,40 +921,92 @@ print_box (int         x,
            bool        apply_thresholds,
            const char *label)
 {
-    static int    good_level_fill_height = 0;
-    static int    bad_level_fill_height = 0;
-    char          buf[32];
-    unsigned int  i;
-    unsigned int  j;
-    float         fill_scaled;
-    unsigned int  fill_height;
-    const char   *fill = " ";
-    unsigned int  fill_percent;
-    unsigned int  x_center;
+    static unsigned int resolution = 0;
+    static int          max_level_fill_height = 0;
+    static int          max_level_fill_height_n = 0;
+    static int          good_level_fill_height = 0;
+    static int          good_level_fill_height_n = 0;
+    static int          bad_level_fill_height = 0;
+    static int          bad_level_fill_height_n = 0;
+    static int          row_color_green = 0;
+    static int          row_color_yellow = 0;
+    static int          row_color_red = 0;
+    static int          row_color_white = 0;
+    char                buf[32];
+    unsigned int        i;
+    unsigned int        j;
+    float               fill_percent;
+    float               fill_scaled;
+    unsigned int        fill_height;
+    unsigned int        fill_height_n;
+    unsigned int        fill_height_partial = 0; /* 0-7 */
+    unsigned int        x_center;
 
-    if (good_level_fill_height == 0) {
+    /* initialize resolution info, only the first time we run */
+    if (resolution == 0) {
+        resolution = RESOLUTION[current_box_charset];
+        /* when using low res, we change the background color and we use a
+         * space as character. */
+        if (resolution == 1) {
+            row_color_green  = COLOR_PAIR (COLOR_PAIR_BOX_BACKGROUND_GREEN);
+            row_color_yellow = COLOR_PAIR (COLOR_PAIR_BOX_BACKGROUND_YELLOW);
+            row_color_red    = COLOR_PAIR (COLOR_PAIR_BOX_BACKGROUND_RED);
+            row_color_white  = COLOR_PAIR (COLOR_PAIR_BOX_BACKGROUND_WHITE);
+        }
+        /* when using high res, we change foreground color and we use partial
+         * block characters */
+        else {
+            row_color_green  = COLOR_PAIR (COLOR_PAIR_BOX_TEXT_GREEN);
+            row_color_yellow = COLOR_PAIR (COLOR_PAIR_BOX_TEXT_YELLOW);
+            row_color_red    = COLOR_PAIR (COLOR_PAIR_BOX_TEXT_RED);
+            row_color_white  = COLOR_PAIR (COLOR_PAIR_BOX_TEXT_WHITE);
+        }
+
+        /* setup max level info */
+        fill_percent = power_to_percentage (POWER_MAX);
+        fill_scaled = ((float) fill_percent * BOX_CONTENT_HEIGHT * resolution) / 100.0;
+        fill_height = floor (fill_scaled + 0.5);
+        fill_height_n = fill_height / resolution;
+        fill_height_partial = fill_height % resolution;
+        max_level_fill_height = fill_height;
+        max_level_fill_height_n = fill_height_n;
+        log_debug ("max level fill percent: %.1f, fill height: %u (res: %u, N %u, partial ignored %u), per-step power: %.2f dBm",
+                   fill_percent, max_level_fill_height, resolution, max_level_fill_height_n, fill_height_partial,
+                   (POWER_MAX - POWER_MIN) / fill_height);
+        assert (fill_height_partial == 0);
+
+        /* setup good level info */
         fill_percent = power_to_percentage (POWER_GOOD);
-        fill_scaled = ((float) fill_percent * BOX_CONTENT_HEIGHT) / 100.0;
+        fill_scaled = ((float) fill_percent * BOX_CONTENT_HEIGHT * resolution) / 100.0;
         fill_height = floor (fill_scaled + 0.5);
-        log_debug ("good level fill percent: %u, fill height: %u, power: %.2f dBm",
-                   fill_percent, fill_height, POWER_GOOD);
+        fill_height_n = fill_height / resolution;
+        fill_height_partial = fill_height % resolution;
         good_level_fill_height = fill_height;
-    }
+        good_level_fill_height_n = fill_height_n;
+        log_debug ("good level fill percent: %.1f, fill height: %u (res: %u, N %u, partial ignored %u), power: %.2f dBm",
+                   fill_percent, good_level_fill_height, resolution, good_level_fill_height_n, fill_height_partial, POWER_GOOD);
+        assert (fill_height_partial == 0);
 
-    if (bad_level_fill_height == 0) {
+        /* setup bad level info */
         fill_percent = power_to_percentage (POWER_BAD);
-        fill_scaled = ((float) fill_percent * BOX_CONTENT_HEIGHT) / 100.0;
+        fill_scaled = ((float) fill_percent * BOX_CONTENT_HEIGHT * resolution) / 100.0;
         fill_height = floor (fill_scaled + 0.5);
-        log_debug ("bad level fill percent: %u, fill height: %u, power: %.2f dBm",
-                   fill_percent, fill_height, POWER_BAD);
+        fill_height_n = fill_height / resolution;
+        fill_height_partial = fill_height % resolution;
         bad_level_fill_height = fill_height;
+        bad_level_fill_height_n = fill_height_n;
+        log_debug ("bad level fill percent: %.1f, fill height: %u (res: %u, N %u, partial ignored %u), power: %.2f dBm",
+                   fill_percent, bad_level_fill_height, resolution, bad_level_fill_height_n, fill_height_partial, POWER_BAD);
+        assert (fill_height_partial == 0);
     }
 
     fill_percent = power_to_percentage (power);
-    fill_scaled = ((float) fill_percent * BOX_CONTENT_HEIGHT) / 100.0;
+    fill_scaled = ((float) fill_percent * BOX_CONTENT_HEIGHT * resolution) / 100.0;
     fill_height = floor (fill_scaled + 0.5);
-    log_debug ("fill percent: %u, fill height: %u, power: %.2f dBm",
-               fill_percent, fill_height, power);
+    fill_height_n = fill_height / resolution;
+    fill_height_partial = fill_height % resolution;
+    log_debug ("fill percent: %.1f, fill height: %u (res: %u, N %u, partial %u), power: %.2f dBm",
+               fill_percent, fill_height, resolution, fill_height_n, fill_height_partial, power);
 
     /* box */
     mvwprintw (context.content_win, y, x, "%s", TL[current_box_charset]);
@@ -947,19 +1014,43 @@ print_box (int         x,
         mvwprintw (context.content_win, y, x+1+i, "%s", HRZ[current_box_charset]);
     mvwprintw (context.content_win, y, x+1+BOX_CONTENT_WIDTH, "%s", TR[current_box_charset]);
     for (i = 0; i < BOX_CONTENT_HEIGHT; i++) {
+        const char  *fill;
+        bool         print = false;
+        unsigned int row_height;
+
+        row_height = BOX_CONTENT_HEIGHT - 1 - i;
+
+        /*
+         * The fill_height_n value specifies how many FULL blocks need to be printed.
+         * The fill_height_partial value specifies the partial height (0-7) of the top block, if any
+         */
         mvwprintw (context.content_win, y+1+i, x, "%s", VRT[current_box_charset]);
-        if (i >= (BOX_CONTENT_HEIGHT - fill_height)) {
+
+        if ((row_height == fill_height_n) && (fill_height_partial > 0)) {
+            /* can't have partial on low resolution */
+            assert (resolution > 1);
+            print = true;
+            fill = BLK[fill_height_partial - 1];
+        } else if (row_height < fill_height_n) {
+            print = true;
+            if (resolution == 1)
+                fill = " ";
+            else
+                fill= BLK[7];
+        }
+
+        if (print) {
             int row_color;
 
-            if (apply_thresholds) {
-                if (i >= (BOX_CONTENT_HEIGHT - bad_level_fill_height))
-                    row_color = COLOR_PAIR (COLOR_PAIR_BOX_CONTENT_RED);
-                else if (i >= (BOX_CONTENT_HEIGHT - good_level_fill_height))
-                    row_color = COLOR_PAIR (COLOR_PAIR_BOX_CONTENT_YELLOW);
+            if (1/* apply_thresholds */) {
+                if (row_height < bad_level_fill_height_n)
+                    row_color = row_color_red;
+                else if (row_height < good_level_fill_height_n)
+                    row_color = row_color_yellow;
                 else
-                    row_color = COLOR_PAIR (COLOR_PAIR_BOX_CONTENT_GREEN);
+                    row_color = row_color_green;
             } else
-                row_color = COLOR_PAIR (COLOR_PAIR_BOX_CONTENT_WHITE);
+                row_color = row_color_white;
 
             wattron (context.content_win, row_color);
             for (j = 0; j < BOX_CONTENT_WIDTH; j++)
