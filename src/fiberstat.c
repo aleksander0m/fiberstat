@@ -1371,6 +1371,9 @@ int main (int argc, char *const *argv)
                 context.stop = true;
                 break;
             case KEY_LEFT:
+#if defined FORCE_TEST_LEVELS
+                context.refresh_contents = true;
+#endif
                 if (context.left_scroll_arrow) {
                     assert (context.first_iface_index > 0);
                     context.first_iface_index--;
@@ -1379,6 +1382,9 @@ int main (int argc, char *const *argv)
                 }
                 break;
             case KEY_RIGHT:
+#if defined FORCE_TEST_LEVELS
+                context.refresh_contents = true;
+#endif
                 if (context.right_scroll_arrow) {
                     context.first_iface_index++;
                     context.refresh_contents = true;
