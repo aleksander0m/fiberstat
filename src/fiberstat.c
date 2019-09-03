@@ -1015,15 +1015,16 @@ print_interface (InterfaceInfo *iface, int x, int y)
 
 #if defined FORCE_TEST_LEVELS
     {
-        static float fill = -20.0;
+        static float fill = POWER_MIN;
+        float extra = (current_box_charset == BOX_CHARSET_ASCII) ? 1 : 0.2;
 
         tx_power = fill;
-        fill += 2.5;
+        fill += extra;
         if (fill > POWER_MAX)
             fill = POWER_MIN;
 
         rx_power = fill;
-        fill += 2.5;
+        fill += extra;
         if (fill > POWER_MAX)
             fill = POWER_MIN;
 
