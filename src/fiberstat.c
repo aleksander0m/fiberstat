@@ -54,19 +54,22 @@
 /* Define to test bar fill levels */
 /* #define FORCE_TEST_LEVELS */
 
-/* Define to test polling fake sysfs files
- * E.g.:
- *   $ mkdir -p /tmp/lo
- *   $ echo 100 > /tmp/lo/power1_input
- *   $ echo 200 > /tmp/lo/power2_input
- */
-/* #define FORCE_TEST_SYSFS */
-
 /* Define to multiply by this number of times the information of the currently
  * available interfaces. E.g. if the system has 4 interfaces, a multiplier value
  * of 3 will make it expose 12 instead.
  */
 /* #define FORCE_TEST_MULTIPLY_IFACES 3 */
+
+/* Define to test polling fake sysfs files, use test/test-sysfs-setup to
+ * initialize the test sysfs file tree.
+ */
+/* #define FORCE_TEST_SYSFS */
+
+#if defined FORCE_TEST_SYSFS
+# define SYSFS_PREFIX "/tmp"
+#else
+# define SYSFS_PREFIX ""
+#endif
 
 /******************************************************************************/
 /* Debug logging */
@@ -405,7 +408,7 @@ power_to_percentage (float power)
 
 #define PHANDLE_SIZE_BYTES 4
 
-#define HWMON_SYSFS_DIR              "/sys/class/hwmon"
+#define HWMON_SYSFS_DIR              SYSFS_PREFIX "/sys/class/hwmon"
 #define HWMON_POWER1_INPUT_FILE      "power1_input"
 #define HWMON_POWER2_INPUT_FILE      "power2_input"
 #define HWMON_POWER1_LABEL_FILE      "power1_label"
@@ -440,7 +443,6 @@ teardown_hwmon_list (void)
     free (context.hwmon);
 }
 
-#if !defined FORCE_TEST_SYSFS
 static HwmonInfo *
 lookup_hwmon (const uint8_t *phandle)
 {
@@ -452,7 +454,6 @@ lookup_hwmon (const uint8_t *phandle)
     }
     return NULL;
 }
-#endif
 
 static bool
 check_file_contents (const char *path,
@@ -626,7 +627,7 @@ setup_hwmon_list (void)
 /******************************************************************************/
 /* List of interfaces */
 
-#define NET_SYSFS_DIR      "/sys/class/net"
+#define NET_SYSFS_DIR      SYSFS_PREFIX "/sys/class/net"
 #define NET_PHANDLE_FILE   "of_node/sfp"
 #define NET_OPERSTATE_FILE "operstate"
 
@@ -634,18 +635,12 @@ typedef struct _InterfaceInfo {
     char      *name;
     HwmonInfo *hwmon;
     char      *operstate_path;
-
-#if defined FORCE_TEST_SYSFS
-    char *tx_power_path;
-    char *rx_power_path;
-#endif
-
-    int    tx_power_fd;
-    int    rx_power_fd;
-    int    operstate_fd;
-    float  tx_power;
-    float  rx_power;
-    char  *operstate;
+    int        tx_power_fd;
+    int        rx_power_fd;
+    int        operstate_fd;
+    float      tx_power;
+    float      rx_power;
+    char      *operstate;
 } InterfaceInfo;
 
 static void
@@ -657,10 +652,6 @@ interface_info_free (InterfaceInfo *iface)
         close (iface->rx_power_fd);
     if (!(iface->operstate_fd < 0))
         close (iface->operstate_fd);
-#if defined FORCE_TEST_SYSFS
-    free (iface->tx_power_path);
-    free (iface->rx_power_path);
-#endif
     free (iface->operstate_path);
     free (iface->operstate);
     free (iface->name);
@@ -676,8 +667,6 @@ teardown_interfaces (void)
         interface_info_free (context.ifaces[i]);
     free (context.ifaces);
 }
-
-#if !defined FORCE_TEST_SYSFS
 
 static bool
 load_interface_phandle (const char *iface,
@@ -705,8 +694,6 @@ load_interface_phandle (const char *iface,
     return true;
 }
 
-#endif
-
 static int
 compare_interface (const void *a, const void *b)
 {
@@ -727,6 +714,7 @@ setup_interfaces (void)
         InterfaceInfo *iface;
         char           path[PATH_MAX];
         HwmonInfo     *hwmon = NULL;
+        uint8_t        phandle[PHANDLE_SIZE_BYTES];
 
         if ((strcmp (dir->d_name, ".") == 0) || (strcmp (dir->d_name, "..") == 0))
             continue;
@@ -734,20 +722,14 @@ setup_interfaces (void)
         if (n_explicit_ifaces && lookup_explicit_interface (dir->d_name) < 0)
             continue;
 
-#if !defined FORCE_TEST_SYSFS
-        {
-            uint8_t phandle[PHANDLE_SIZE_BYTES];
+        if (!load_interface_phandle (dir->d_name, phandle))
+            continue;
 
-            if (!load_interface_phandle (dir->d_name, phandle))
-                continue;
-
-            hwmon = lookup_hwmon (phandle);
-            if (!hwmon) {
-                log_warning ("couldn't match hwmon entry for net iface '%s'", dir->d_name);
-                continue;
-            }
+        hwmon = lookup_hwmon (phandle);
+        if (!hwmon) {
+            log_warning ("couldn't match hwmon entry for net iface '%s'", dir->d_name);
+            continue;
         }
-#endif
 
         iface = calloc (1, sizeof (InterfaceInfo));
         if (iface)
@@ -764,25 +746,12 @@ setup_interfaces (void)
         iface->rx_power_fd = -1;
         iface->operstate_fd = -1;
 
-#if !defined FORCE_TEST_SYSFS
         iface->tx_power_fd = open (hwmon->tx_power_path, O_RDONLY);
         iface->rx_power_fd = open (hwmon->rx_power_path, O_RDONLY);
         if (iface->tx_power_fd < 0)
             log_warning ("couldn't open TX power file for interface '%s' at %s", iface->name, hwmon->tx_power_path);
         if (iface->rx_power_fd < 0)
             log_warning ("couldn't open RX power file for interface '%s' at %s", iface->name, hwmon->rx_power_path);
-#else
-        snprintf (path, sizeof (path), "/tmp/%s/" HWMON_POWER1_INPUT_FILE, iface->name);
-        iface->tx_power_path = strdup (path);
-        snprintf (path, sizeof (path), "/tmp/%s/" HWMON_POWER2_INPUT_FILE, iface->name);
-        iface->rx_power_path = strdup (path);
-        iface->tx_power_fd = open (iface->tx_power_path, O_RDONLY);
-        iface->rx_power_fd = open (iface->rx_power_path, O_RDONLY);
-        if (iface->tx_power_fd < 0)
-            log_warning ("couldn't open TX power file for interface '%s' at %s", iface->name, iface->tx_power_path);
-        if (iface->rx_power_fd < 0)
-            log_warning ("couldn't open RX power file for interface '%s' at %s", iface->name, iface->rx_power_path);
-#endif
 
         snprintf (path, sizeof (path), NET_SYSFS_DIR "/%s/" NET_OPERSTATE_FILE, iface->name);
         iface->operstate_path = strdup (path);
