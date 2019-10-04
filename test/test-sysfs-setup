@@ -1,0 +1,46 @@
+#!/bin/bash
+
+BASE_TEST_SYSFS_DIR=/tmp
+
+# Same definitions as in fiberstat.c
+NET_SYSFS_DIR="/sys/class/net"
+NET_PHANDLE_FILE="of_node/sfp"
+NET_OPERSTATE_FILE="operstate"
+HWMON_SYSFS_DIR="/sys/class/hwmon"
+HWMON_POWER1_INPUT_FILE="power1_input"
+HWMON_POWER2_INPUT_FILE="power2_input"
+HWMON_POWER1_LABEL_FILE="power1_label"
+HWMON_POWER2_LABEL_FILE="power2_label"
+HWMON_TX_POWER_LABEL_CONTENT="TX_power"
+HWMON_RX_POWER_LABEL_CONTENT="RX_power"
+HWMON_PHANDLE_FILE="of_node/phandle"
+
+HWMON_IDX=0
+POWER_VAL=50
+for NETIFACE in $(ls ${NET_SYSFS_DIR}); do
+
+    echo "creating test sysfs for ${NETIFACE}..."
+    mkdir -p ${BASE_TEST_SYSFS_DIR}${NET_SYSFS_DIR}/${NETIFACE}
+    echo "creating fake phandle for ${NETIFACE}..."
+    mkdir -p ${BASE_TEST_SYSFS_DIR}${NET_SYSFS_DIR}/${NETIFACE}/$(dirname ${NET_PHANDLE_FILE})
+    printf "%04d" ${HWMON_IDX} > ${BASE_TEST_SYSFS_DIR}${NET_SYSFS_DIR}/${NETIFACE}/${NET_PHANDLE_FILE}
+    echo "creating fake operstate file for ${NETIFACE}..."
+    cp -f ${NET_SYSFS_DIR}/${NETIFACE}/${NET_OPERSTATE_FILE} ${BASE_TEST_SYSFS_DIR}${NET_SYSFS_DIR}/${NETIFACE}/${NET_OPERSTATE_FILE}
+
+    HWMON="hwmon${HWMON_IDX}"
+    echo "creating test sysfs for ${HWMON}..."
+    mkdir -p ${BASE_TEST_SYSFS_DIR}${HWMON_SYSFS_DIR}/${HWMON}
+    echo "creating TX label/input files for ${HWMON}..."
+    echo -n "${HWMON_TX_POWER_LABEL_CONTENT}" > ${BASE_TEST_SYSFS_DIR}${HWMON_SYSFS_DIR}/${HWMON}/${HWMON_POWER1_LABEL_FILE}
+    echo -n "${POWER_VAL}" > ${BASE_TEST_SYSFS_DIR}${HWMON_SYSFS_DIR}/${HWMON}/${HWMON_POWER1_INPUT_FILE}
+    POWER_VAL=$((POWER_VAL + 50))
+    echo "creating RX label/input files for ${HWMON}..."
+    echo -n "${HWMON_RX_POWER_LABEL_CONTENT}" > ${BASE_TEST_SYSFS_DIR}${HWMON_SYSFS_DIR}/${HWMON}/${HWMON_POWER2_LABEL_FILE}
+    echo -n "${POWER_VAL}" > ${BASE_TEST_SYSFS_DIR}${HWMON_SYSFS_DIR}/${HWMON}/${HWMON_POWER2_INPUT_FILE}
+    POWER_VAL=$((POWER_VAL + 50))
+    echo "creating fake phandle for ${HWMON}..."
+    mkdir -p ${BASE_TEST_SYSFS_DIR}${HWMON_SYSFS_DIR}/${HWMON}/$(dirname ${HWMON_PHANDLE_FILE})
+    printf "%04d" ${HWMON_IDX} > ${BASE_TEST_SYSFS_DIR}${HWMON_SYSFS_DIR}/${HWMON}/${HWMON_PHANDLE_FILE}
+
+    HWMON_IDX=$((HWMON_IDX + 1))
+done

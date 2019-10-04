@@ -33,7 +33,8 @@ AC_SUBST(NCURSES_CFLAGS)
 AC_SUBST(NCURSES_LIBS)
 
 AC_CONFIG_FILES([Makefile
-                 src/Makefile])
+                 src/Makefile
+                 test/Makefile])
 AC_OUTPUT
 
 echo "

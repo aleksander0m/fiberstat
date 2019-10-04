@@ -1,5 +1,5 @@
 
-SUBDIRS = . src
+SUBDIRS = . src test
 
 DISTCHECK_CONFIGURE_FLAGS = \
 	--enable-more-warnings=error \
