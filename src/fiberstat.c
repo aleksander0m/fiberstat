@@ -1425,6 +1425,8 @@ wait_for_input (void)
 
 int main (int argc, char *const *argv)
 {
+    int status = 0;
+
     setup_context (argc, argv);
     setup_log ();
     setup_locale ();
@@ -1434,17 +1436,20 @@ int main (int argc, char *const *argv)
 
     if (setup_curses () < 0) {
         fprintf (stderr, "error: couldn't setup curses\n");
-        return -1;
+        status = -1;
+        goto out_cleanup_log;
     }
 
     if (setup_hwmon_list () < 0) {
         fprintf (stderr, "error: couldn't setup hwmon list\n");
-        return -1;
+        status = -2;
+        goto out_cleanup_curses;
     }
 
     if (setup_interfaces () < 0) {
         fprintf (stderr, "error: couldn't setup interfaces\n");
-        return -1;
+        status = -3;
+        goto out_cleanup_hwmon;
     }
 
     do {
@@ -1496,8 +1501,11 @@ int main (int argc, char *const *argv)
     } while (!context.stop);
 
     teardown_interfaces ();
+out_cleanup_hwmon:
     teardown_hwmon_list ();
+out_cleanup_curses:
     teardown_curses ();
+out_cleanup_log:
     teardown_log();
-    return 0;
+    return status;
 }
