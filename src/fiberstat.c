@@ -583,16 +583,23 @@ setup_hwmon_list (void)
         if (!load_power_input_file_paths (dir->d_name, &tx_file_path, &rx_file_path))
             continue;
 
-        if (!load_hwmon_phandle (dir->d_name, phandle))
+        if (!load_hwmon_phandle (dir->d_name, phandle)) {
+            free (tx_file_path);
+            free (rx_file_path);
             continue;
+        }
 
         /* valid hwmon entry */
 
         info = calloc (sizeof (HwmonInfo), 1);
-        if (!info)
+        if (info)
+            info->name = strdup (dir->d_name);
+        if (!info || !info->name) {
+            free (tx_file_path);
+            free (rx_file_path);
             return -2;
+        }
 
-        info->name = strdup (dir->d_name);
         info->tx_power_path = tx_file_path;
         info->rx_power_path = rx_file_path;
         memcpy (info->sfp_phandle, phandle, sizeof (phandle));
