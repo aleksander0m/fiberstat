@@ -428,7 +428,7 @@ static void
 hwmon_info_free (HwmonInfo *info)
 {
     free (info->tx_power_path);
-    free (info->tx_power_path);
+    free (info->rx_power_path);
     free (info->name);
     free (info);
 }
