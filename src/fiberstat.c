@@ -44,6 +44,9 @@
 
 #include <ncurses.h>
 
+/* natsort */
+#include <strnatcmp.h>
+
 /******************************************************************************/
 
 #define PROGRAM_NAME    "fiberstat"
@@ -697,7 +700,7 @@ load_interface_phandle (const char *iface,
 static int
 compare_interface (const void *a, const void *b)
 {
-    return strcmp ((*((InterfaceInfo **)a))->name, (*((InterfaceInfo **)b))->name);
+    return strnatcmp ((*((InterfaceInfo **)a))->name, (*((InterfaceInfo **)b))->name);
 }
 
 static int
