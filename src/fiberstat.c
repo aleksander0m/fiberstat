@@ -20,8 +20,11 @@
  * Copyright (C) 2019 Aleksander Morgado <aleksander@aleksander.es>
  */
 
-#include <config.h>
+#ifndef _GNU_SOURCE
+# define _GNU_SOURCE
+#endif
 
+#include <config.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
