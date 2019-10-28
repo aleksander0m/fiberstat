@@ -56,6 +56,13 @@ Or with a polling rate faster than the default of 1Hz; e.g. setting 10Hz
 $ fiberstat -t 100
 ```
 
+In order to get colored output on fiberstat when you're running it over a
+serial link, you may run it through minicom like this:
+```
+$ minicom -D /dev/ttyUSB2 --color=on
+# TERM=xterm fiberstat
+```
+
 ## License
 
 This fiberstat program is licensed under the GPLv3+ license.
