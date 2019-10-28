@@ -9,6 +9,8 @@ be associated to the network interface, and this program just polls
 the power values in mW and shows them in a bar diagram with the
 values in dBm.
 
+<p align="center"><img src="data/fiberstat.png" width="601"></p>
+
 ## Building
 
 ### options and dependencies
